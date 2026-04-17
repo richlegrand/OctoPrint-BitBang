@@ -1,0 +1,40 @@
+<div id="settings_bitbang">
+    <h3>BitBang Remote Access</h3>
+
+    <form class="form-horizontal">
+        <div class="control-group">
+            <label class="control-label">Enabled</label>
+            <div class="controls">
+                <input type="checkbox" data-bind="checked: settings.plugins.bitbang.enabled">
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label class="control-label">PIN Protection</label>
+            <div class="controls">
+                <input type="text" class="input-medium"
+                       data-bind="value: settings.plugins.bitbang.pin"
+                       placeholder="Leave empty to disable">
+                <span class="help-inline">Optional PIN to protect remote access</span>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label class="control-label">Remote URL</label>
+            <div class="controls">
+                <span data-bind="visible: settings.plugins.bitbang.url()">
+                    <a data-bind="attr: {href: settings.plugins.bitbang.url()}, text: settings.plugins.bitbang.url()"
+                       target="_blank" rel="noopener"></a>
+                </span>
+                <span data-bind="visible: !settings.plugins.bitbang.url()" class="muted">
+                    URL will appear after BitBang connects
+                </span>
+                <span class="help-inline">Share this link for remote access</span>
+            </div>
+        </div>
+    </form>
+
+    <p class="muted" style="margin-top: 16px;">
+        Restart OctoPrint after changing settings.
+    </p>
+</div>

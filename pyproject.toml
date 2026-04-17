@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OctoPrint-BitBang"
+version = "0.1.0"
+description = "Remote OctoPrint access with live H.264 video via BitBang WebRTC"
+readme = "README.md"
+license = "MIT"
+authors = [{name = "Rich LeGrand"}]
+requires-python = ">=3.10"
+dependencies = [
+    "bitbang>=0.1.46",
+    "flask",
+]
+
+[project.scripts]
+octoprint-bitbang = "octoprint_bitbang.app:main"
+
+[project.entry-points."octoprint.plugin"]
+bitbang = "octoprint_bitbang"
+
+[project.urls]
+Homepage = "https://github.com/richlegrand/OctoPrint-BitBang"
+Source = "https://github.com/richlegrand/OctoPrint-BitBang"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["octoprint_bitbang*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.html", "static/*.png", "static/js/*.js", "templates/*.jinja2"]

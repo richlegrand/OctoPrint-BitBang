@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; }
+        video { width: 100%; max-width: 640px; background: #000; }
+        #status { color: #666; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h2>OctoPrint BitBang Prototype</h2>
+    <video data-bitbang-stream="camera" autoplay playsinline muted></video>
+    <p id="status">Camera stream + HTTP tunnel active</p>
+    <p>In the real plugin, OctoPrint's full UI loads here via the BitBang HTTP tunnel.</p>
+</body>
+</html>

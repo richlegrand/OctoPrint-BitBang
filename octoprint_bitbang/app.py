@@ -35,8 +35,6 @@ def main():
     add_bitbang_args(parser)
     parser.add_argument('--proxy',
                         help='Local server to proxy (e.g. localhost:5000)')
-    parser.add_argument('--api-key',
-                        help='OctoPrint API key (bypasses CSRF)')
     parser.add_argument('--camera',
                         help='Camera source override (e.g. /dev/video0, rtsp://...)')
     args = parser.parse_args()
@@ -45,7 +43,7 @@ def main():
     ws_target = None
     if args.proxy:
         from .proxy import ReverseProxy
-        wsgi_app = ReverseProxy(args.proxy, api_key=getattr(args, 'api_key', None))
+        wsgi_app = ReverseProxy(args.proxy)
         ws_target = args.proxy  # WebSocket bridging to same target
         print(f"Proxying to {args.proxy}")
     else:

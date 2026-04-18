@@ -35,8 +35,7 @@ try:
 
         def _start_bitbang(self):
             port = self._settings.global_get(["server", "port"]) or 5000
-            api_key = self._settings.global_get(["api", "key"])
-            proxy_app = ReverseProxy(f"localhost:{port}", api_key=api_key)
+            proxy_app = ReverseProxy(f"localhost:{port}")
 
             camera = detect_camera(logger=self._logger)
             if camera:

@@ -4,6 +4,9 @@ Remote OctoPrint access with live H.264 video via BitBang WebRTC.
 No account, no subscription, no port forwarding. One shareable link.
 """
 
+__plugin_name__ = "BitBang"
+__plugin_pythoncompat__ = ">=3.7,<4"
+
 try:
     import threading
     import octoprint.plugin
@@ -32,7 +35,8 @@ try:
 
         def _start_bitbang(self):
             port = self._settings.global_get(["server", "port"]) or 5000
-            proxy_app = ReverseProxy(f"localhost:{port}")
+            api_key = self._settings.global_get(["api", "key"])
+            proxy_app = ReverseProxy(f"localhost:{port}", api_key=api_key)
 
             camera = detect_camera(logger=self._logger)
             if camera:
@@ -45,6 +49,7 @@ try:
             self._adapter = OctoPrintBitBang(
                 proxy_app,
                 camera_source=camera,
+                ws_target=f"localhost:{port}",
                 program_name="octoprint",
                 pin=pin,
             )
@@ -81,8 +86,6 @@ try:
                 "js": ["js/bitbang.js"],
             }
 
-    __plugin_name__ = "BitBang"
-    __plugin_pythoncompat__ = ">=3.7,<4"
     __plugin_implementation__ = BitBangPlugin()
 
 except ImportError:

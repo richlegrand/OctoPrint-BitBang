@@ -9,15 +9,18 @@ the BitBang WebRTC tunnel.
 import urllib.request
 import urllib.error
 
+CHUNK_SIZE = 32768  # 32KB chunks for streaming responses
+
 
 class ReverseProxy:
     """WSGI app that proxies requests to a local HTTP server."""
 
-    def __init__(self, target="localhost:5000"):
+    def __init__(self, target="localhost:5000", api_key=None):
         # Normalize target to include scheme
         if not target.startswith("http"):
             target = f"http://{target}"
         self.target = target.rstrip("/")
+        self.api_key = api_key
 
     def __call__(self, environ, start_response):
         method = environ["REQUEST_METHOD"]
@@ -45,16 +48,23 @@ class ReverseProxy:
         if content_length and int(content_length) > 0:
             body = environ["wsgi.input"].read(int(content_length))
 
+        # Inject API key to bypass CSRF checks (OctoPrint exempts
+        # API-key-authenticated requests from CSRF verification)
+        if self.api_key:
+            headers["X-Api-Key"] = self.api_key
+
         # Forward request to target
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
 
         try:
-            resp = urllib.request.urlopen(req, timeout=30)
+            resp = urllib.request.urlopen(req, timeout=10)
             status = f"{resp.status} {resp.reason}"
             resp_headers = [(k, v) for k, v in resp.getheaders()]
-            body_bytes = resp.read()
             start_response(status, resp_headers)
-            return [body_bytes]
+            # Stream response in chunks instead of buffering the whole thing.
+            # This lets the WSGI adapter send SWSP frames incrementally and
+            # avoids blocking on long-held streaming responses (SockJS).
+            return _iter_response(resp)
         except urllib.error.HTTPError as e:
             status = f"{e.code} {e.reason}"
             resp_headers = [(k, v) for k, v in e.headers.items()]
@@ -64,3 +74,17 @@ class ReverseProxy:
         except Exception as e:
             start_response("502 Bad Gateway", [("Content-Type", "text/plain")])
             return [f"Proxy error: {e}".encode()]
+
+
+def _iter_response(resp):
+    """Yield response body in chunks."""
+    try:
+        while True:
+            chunk = resp.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            yield chunk
+    except Exception:
+        pass
+    finally:
+        resp.close()

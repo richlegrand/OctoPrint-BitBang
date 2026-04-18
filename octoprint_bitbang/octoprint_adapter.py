@@ -31,8 +31,9 @@ class OctoPrintBitBang(BitBangWSGI):
     Falls back to HTTP-only mode if no camera is found.
     """
 
-    def __init__(self, app, camera_source=None, **kwargs):
+    def __init__(self, app, camera_source=None, ws_target=None, **kwargs):
         super().__init__(app, **kwargs)
+        self.ws_target = ws_target  # host:port for WebSocket bridging
         self.relay = MediaRelay()
         self.player = None
         self._init_camera(camera_source)

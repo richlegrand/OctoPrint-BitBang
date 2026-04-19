@@ -11,7 +11,7 @@ try:
     import threading
     import octoprint.plugin
 
-    from .proxy import OctoPrintProxy
+    from bitbang.proxy import ReverseProxyASGI
     from .octoprint_adapter import OctoPrintBitBang
     from .camera import detect_camera
 
@@ -21,6 +21,8 @@ try:
     from aiortc import RTCPeerConnection, RTCSessionDescription
     from aiortc.contrib.media import MediaRelay
 
+    from octoprint.schema.webcam import Webcam, WebcamCompatibility
+
     class BitBangPlugin(
         octoprint.plugin.StartupPlugin,
         octoprint.plugin.ShutdownPlugin,
@@ -28,6 +30,7 @@ try:
         octoprint.plugin.TemplatePlugin,
         octoprint.plugin.AssetPlugin,
         octoprint.plugin.BlueprintPlugin,
+        octoprint.plugin.WebcamProviderPlugin,
     ):
         def __init__(self):
             super().__init__()
@@ -43,7 +46,7 @@ try:
 
         def _start_bitbang(self):
             port = self._settings.global_get(["server", "port"]) or 5000
-            proxy_app = OctoPrintProxy(f"localhost:{port}")
+            proxy_app = ReverseProxyASGI(f"localhost:{port}")
 
             # Use configured camera or auto-detect
             camera_device = self._settings.get(["camera_device"])
@@ -202,6 +205,72 @@ try:
                 return "Size: Discrete" in result.stdout
             except Exception:
                 return False
+
+        # -- WebcamProviderPlugin API --
+
+        def get_webcam_configurations(self):
+            return [
+                Webcam(
+                    name="bitbang",
+                    displayName="BitBang Camera",
+                    canSnapshot=True,
+                    snapshotDisplay="BitBang plugin captures snapshot from video stream",
+                )
+            ]
+
+        def take_webcam_snapshot(self, webcamName):
+            """Grab a frame from the video track and return JPEG bytes."""
+            if not self._adapter or not self._adapter.player or not self._adapter.player.video:
+                from octoprint.webcams import WebcamNotAbleToTakeSnapshotException
+                raise WebcamNotAbleToTakeSnapshotException(webcamName)
+
+            import io
+            loop = self._adapter._loop
+            if not loop:
+                from octoprint.webcams import WebcamNotAbleToTakeSnapshotException
+                raise WebcamNotAbleToTakeSnapshotException(webcamName)
+
+            future = asyncio.run_coroutine_threadsafe(
+                self._capture_frame(), loop
+            )
+            try:
+                jpeg_bytes = future.result(timeout=5)
+                return iter([jpeg_bytes])
+            except Exception as e:
+                self._logger.error(f"Snapshot failed: {e}")
+                from octoprint.webcams import WebcamNotAbleToTakeSnapshotException
+                raise WebcamNotAbleToTakeSnapshotException(webcamName)
+
+        async def _capture_frame(self):
+            """Grab one frame from the video relay and encode as JPEG."""
+            import io as _io
+            import av as _av
+
+            # Subscribe to the relay to get a frame without
+            # stealing from existing WebRTC consumers
+            track = self._adapter.relay.subscribe(self._adapter.player.video)
+            try:
+                frame = await track.recv()
+            finally:
+                track.stop()
+
+            # CRITICAL: copy the raw plane data immediately. The relay
+            # shares frame buffers with the encoder -- any sws_scale call
+            # (to_ndarray, to_image, reformat) will segfault if the encoder
+            # is concurrently accessing the same buffer.
+            planes_data = [bytes(frame.planes[i]) for i in range(len(frame.planes))]
+            width, height = frame.width, frame.height
+            fmt = frame.format.name
+
+            # Build a new independent frame from the copied data
+            new_frame = _av.VideoFrame(width, height, fmt)
+            for i, data in enumerate(planes_data):
+                new_frame.planes[i].update(data)
+
+            # Now safe to convert -- this frame's buffer is ours alone
+            buf = _io.BytesIO()
+            new_frame.to_image().save(buf, format="JPEG", quality=85)
+            return buf.getvalue()
 
         def on_shutdown(self):
             pass  # Daemon thread exits with OctoPrint

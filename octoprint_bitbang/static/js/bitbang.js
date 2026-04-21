@@ -73,6 +73,34 @@
         return true;
     }
 
+    // Intercept download links that use absolute URLs. OctoPrint
+    // generates these with the BitBang host, but clicking them navigates
+    // outside the iframe/SW scope. Use fetch + blob instead.
+    if (isBitBang) {
+        document.addEventListener("click", function (e) {
+            var link = e.target.closest("a[href]");
+            if (!link) return;
+            var href = link.getAttribute("href");
+            if (!href || !href.match(/\/downloads\//)) return;
+
+            e.preventDefault();
+            var filename = href.split("/").pop();
+            fetch(href).then(function (r) {
+                if (!r.ok) throw new Error("Download failed");
+                return r.blob();
+            }).then(function (blob) {
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement("a");
+                a.href = url;
+                a.download = decodeURIComponent(filename);
+                a.click();
+                URL.revokeObjectURL(url);
+            }).catch(function (err) {
+                console.log("[BitBang] Download failed:", err);
+            });
+        }, true);
+    }
+
     if (isBitBang) {
         // Remote mode: bootstrap.js wires the track via data-bitbang-stream
         function injectRemote() {

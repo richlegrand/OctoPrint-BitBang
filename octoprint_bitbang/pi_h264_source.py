@@ -56,18 +56,25 @@ class PiH264Track(MediaStreamTrack):
 
     kind = "video"
 
-    def __init__(self, size=(640, 480), framerate=30, bitrate=1_500_000):
+    def __init__(self, size=(640, 480), framerate=30, bitrate=1_500_000,
+                 brightness=0, flip_horizontal=False, flip_vertical=False):
         super().__init__()
         from picamera2 import Picamera2
         from picamera2.encoders import H264Encoder
+        from libcamera import Transform
 
         self._size = size
         self._framerate = framerate
+        self._brightness = brightness  # -100..100, scaled to picamera2's -1.0..1.0
 
         self.picam2 = Picamera2()
         config = self.picam2.create_video_configuration(
             main={"size": size, "format": "YUV420"},
-            controls={"FrameRate": float(framerate)},
+            transform=Transform(hflip=bool(flip_horizontal), vflip=bool(flip_vertical)),
+            controls={
+                "FrameRate": float(framerate),
+                "Brightness": self._brightness / 100.0,
+            },
         )
         self.picam2.configure(config)
 
@@ -107,6 +114,11 @@ class PiH264Track(MediaStreamTrack):
     async def recv(self):
         self._ensure_started()
         return await self._queue.get()
+
+    def set_brightness(self, value):
+        """Update brightness live. `value` is -100..100 (mapped to -1.0..1.0)."""
+        self._brightness = max(-100, min(100, int(value)))
+        self.picam2.set_controls({"Brightness": self._brightness / 100.0})
 
     @property
     def video(self):

@@ -24,11 +24,14 @@
         btn.onclick = function () {
             if (document.fullscreenElement) {
                 document.exitFullscreen();
-            } else {
-                var el = video.requestFullscreen ? video : wrapper;
-                var fn = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
-                if (fn) {
-                    fn.call(el).catch(function (err) {
+                return;
+            }
+            var fn = video.requestFullscreen || video.webkitRequestFullscreen ||
+                     video.webkitEnterFullscreen || video.msRequestFullscreen;
+            if (fn) {
+                var ret = fn.call(video);
+                if (ret && ret.catch) {
+                    ret.catch(function (err) {
                         console.log("[BitBang] Fullscreen failed:", err);
                     });
                 }
@@ -38,6 +41,57 @@
         video.parentNode.insertBefore(wrapper, video);
         wrapper.appendChild(video);
         wrapper.appendChild(btn);
+    }
+
+    function addBrightnessControl(wrapper, initialValue) {
+        var container = document.createElement("div");
+        container.style.cssText = "position:absolute;bottom:8px;left:8px;right:40px;display:flex;align-items:center;gap:6px;opacity:0.6;z-index:10;pointer-events:auto;transition:opacity 0.2s;";
+        container.onmouseover = function () { container.style.opacity = "1"; };
+        container.onmouseout = function () { container.style.opacity = "0.6"; };
+
+        var icon = document.createElement("i");
+        icon.className = "fas fa-sun";
+        icon.style.color = "#fff";
+        icon.title = "Brightness";
+
+        var slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = "-100";
+        slider.max = "100";
+        slider.step = "5";
+        slider.value = String(initialValue || 0);
+        slider.style.cssText = "flex:1;max-width:200px;cursor:pointer;";
+
+        var debounce;
+        slider.oninput = function () {
+            clearTimeout(debounce);
+            debounce = setTimeout(function () {
+                fetch("/plugin/bitbang/camera/brightness", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ value: parseInt(slider.value, 10) })
+                }).catch(function (err) {
+                    console.log("[BitBang] Brightness update failed:", err);
+                });
+            }, 150);
+        };
+
+        container.appendChild(icon);
+        container.appendChild(slider);
+        wrapper.appendChild(container);
+    }
+
+    function applyCameraConfig(video) {
+        // Flip is applied at the picamera2 sensor level (baked into the
+        // bitstream) so no CSS transform is needed here. We only fetch
+        // brightness to seed the slider's initial position.
+        fetch("/plugin/bitbang/camera/config").then(function (r) {
+            return r.json();
+        }).then(function (cfg) {
+            if (video.parentNode) {
+                addBrightnessControl(video.parentNode, cfg.brightness);
+            }
+        }).catch(function () {});
     }
 
     function replaceWebcam(video) {
@@ -62,6 +116,7 @@
             }
             classicContainer.appendChild(video);
             addFullscreenButton(video);
+            applyCameraConfig(video);
             return true;
         }
 
@@ -70,6 +125,7 @@
         if (!img) return false;
         img.parentNode.replaceChild(video, img);
         addFullscreenButton(video);
+        applyCameraConfig(video);
         return true;
     }
 

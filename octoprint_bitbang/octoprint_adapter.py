@@ -55,6 +55,15 @@ class OctoPrintBitBang(BitBangASGI):
                     options=source.get("options", {}),
                 )
                 print(f"Opened USB camera: {source['device']}")
+                if self.player.video and (
+                    source.get("flip_horizontal") or source.get("flip_vertical")
+                ):
+                    from .flip_track import FlippedTrack
+                    self.player.video = FlippedTrack(
+                        self.player.video,
+                        hflip=source.get("flip_horizontal", False),
+                        vflip=source.get("flip_vertical", False),
+                    )
             except Exception as e:
                 print(f"Warning: Could not open camera '{source['device']}': {e}")
 
@@ -66,8 +75,12 @@ class OctoPrintBitBang(BitBangASGI):
                 size = source.get("size", (640, 480))
                 framerate = source.get("framerate", 30)
                 bitrate = source.get("bitrate", 4_000_000)
+                brightness = source.get("brightness", 0)
                 self.player = PiH264Track(
                     size=size, framerate=framerate, bitrate=bitrate,
+                    brightness=brightness,
+                    flip_horizontal=source.get("flip_horizontal", False),
+                    flip_vertical=source.get("flip_vertical", False),
                 )
                 print(f"Opened Pi CSI camera via H264Encoder ({size[0]}x{size[1]}@{framerate})")
             except Exception as e:

@@ -65,20 +65,28 @@ try:
             camera_device = self._settings.get(["camera_device"])
             camera_resolution = self._settings.get(["camera_resolution"]) or "640x480"
 
+            flip_h = self._settings.get_boolean(["flip_horizontal"])
+            flip_v = self._settings.get_boolean(["flip_vertical"])
+
             if camera_device:
                 camera = {
                     "type": "usb",
                     "device": camera_device,
                     "format": "v4l2",
                     "options": {"framerate": "30", "video_size": camera_resolution},
+                    "flip_horizontal": flip_h,
+                    "flip_vertical": flip_v,
                 }
                 self._logger.info(f"Camera: {camera_device} at {camera_resolution}")
             else:
                 camera = detect_camera(logger=self._logger)
                 if camera:
+                    camera["flip_horizontal"] = flip_h
+                    camera["flip_vertical"] = flip_v
                     if camera["type"] == "picamera2":
                         w, h = (int(x) for x in camera_resolution.split("x"))
                         camera["size"] = (w, h)
+                        camera["brightness"] = self._settings.get_int(["brightness"]) or 0
                     else:
                         camera.setdefault("options", {})["video_size"] = camera_resolution
                     self._logger.info(f"Camera: {camera['type']} at {camera_resolution}")
@@ -196,6 +204,34 @@ try:
             }
 
         # -- Camera settings API --
+
+        @octoprint.plugin.BlueprintPlugin.route("/camera/config", methods=["GET"])
+        def camera_config(self):
+            """Return current camera display / tuning config for the client."""
+            return flask.jsonify({
+                "flip_horizontal": bool(self._settings.get_boolean(["flip_horizontal"])),
+                "flip_vertical": bool(self._settings.get_boolean(["flip_vertical"])),
+                "brightness": self._settings.get_int(["brightness"]) or 0,
+            })
+
+        @octoprint.plugin.BlueprintPlugin.route("/camera/brightness", methods=["POST"])
+        @octoprint.plugin.BlueprintPlugin.csrf_exempt()
+        def set_brightness(self):
+            """Update camera brightness live. Accepts {"value": int -100..100}."""
+            try:
+                value = int(flask.request.json.get("value"))
+            except (TypeError, ValueError, AttributeError):
+                return flask.jsonify({"error": "missing or invalid value"}), 400
+            value = max(-100, min(100, value))
+
+            player = self._adapter.player if self._adapter else None
+            if player is None or not hasattr(player, "set_brightness"):
+                return flask.jsonify({"error": "brightness not supported on this camera"}), 400
+
+            player.set_brightness(value)
+            self._settings.set_int(["brightness"], value)
+            self._settings.save()
+            return flask.jsonify({"value": value})
 
         @octoprint.plugin.BlueprintPlugin.route("/cameras", methods=["GET"])
         def list_cameras(self):
@@ -362,6 +398,9 @@ try:
                 "url": "",
                 "camera_device": "",
                 "camera_resolution": "640x480",
+                "flip_horizontal": False,
+                "flip_vertical": False,
+                "brightness": 0,
             }
 
         def get_template_configs(self):

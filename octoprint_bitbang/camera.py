@@ -1,63 +1,35 @@
 """Camera auto-detection for OctoPrint BitBang.
 
 Detects available camera sources in priority order:
-1. camera-streamer RTSP (H.264 passthrough, zero CPU)
-2. picamera2 CSI camera (Pi hardware, software encode in aiortc)
-3. USB webcam via V4L2/dshow/avfoundation (software encode)
-4. None (HTTP-only mode, no crash)
+1. picamera2 CSI camera (Pi hardware, software encode in aiortc)
+2. USB webcam via V4L2/dshow/avfoundation (software encode)
+3. None (HTTP-only mode, no crash)
 """
 
 import sys
-import socket
 
 
 def detect_camera(logger=None):
     """Detect best available camera source.
 
-    Returns dict with keys: type, device/url, format, options
+    Returns dict with keys: type, device, format, options
     Or None if no camera found.
     """
     log = logger.info if logger else lambda msg: print(f"[camera] {msg}")
 
-    # 1. RTSP (camera-streamer)
-    source = _try_rtsp()
-    if source:
-        log(f"Found camera-streamer RTSP at {source['url']}")
-        return source
-
-    # 2. picamera2 (Raspberry Pi CSI)
+    # 1. picamera2 (Raspberry Pi CSI)
     source = _try_picamera2()
     if source:
         log("Found Pi CSI camera via picamera2")
         return source
 
-    # 3. USB webcam (platform-specific)
+    # 2. USB webcam (platform-specific)
     source = _try_usb_webcam()
     if source:
         log(f"Found USB webcam: {source['device']}")
         return source
 
     log("No camera found - running in HTTP-only mode")
-    return None
-
-
-def _try_rtsp(url="rtsp://localhost:8554/stream.h264", timeout=1.0):
-    """Check if camera-streamer RTSP is available."""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex(('localhost', 8554))
-        sock.close()
-        if result == 0:
-            return {
-                "type": "rtsp",
-                "url": url,
-                "format": "rtsp",
-                "options": {"rtsp_transport": "tcp"},
-                "decode": False,
-            }
-    except Exception:
-        pass
     return None
 
 

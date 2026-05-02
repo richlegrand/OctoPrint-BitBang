@@ -7,6 +7,7 @@ aiortc's H264Payloader.pack() packetizes into RTP without re-encoding.
 """
 
 import asyncio
+import io
 from fractions import Fraction
 
 import av
@@ -77,6 +78,9 @@ class PiH264Track(MediaStreamTrack):
             },
         )
         self.picam2.configure(config)
+        # Start the camera up front (no encoder yet) so capture_image works
+        # before any WebRTC client connects — needed for timelapse snapshots.
+        self.picam2.start()
 
         # iperiod = framerate → 1s GOP. repeat=True → SPS/PPS before each IDR
         # so late-joining WebRTC subscribers can start decoding quickly.
@@ -87,18 +91,18 @@ class PiH264Track(MediaStreamTrack):
             profile="baseline",
         )
 
-        self._started = False
+        self._encoder_started = False
         self._queue: asyncio.Queue | None = None
         self._output: _QueueOutput | None = None
 
     def _ensure_started(self):
-        if self._started:
+        if self._encoder_started:
             return
         loop = asyncio.get_running_loop()
         self._queue = asyncio.Queue(maxsize=30)
         self._output = _QueueOutput(loop, self._queue)
-        self.picam2.start_recording(self.encoder, self._output)
-        self._started = True
+        self.picam2.start_encoder(self.encoder, self._output)
+        self._encoder_started = True
         # V4L2 hw encoder on Pi 4 doesn't honor iperiod reliably; force a
         # keyframe every second so late-joining WebRTC peers can sync.
         self._keyframe_task = loop.create_task(self._keyframe_loop())
@@ -120,6 +124,16 @@ class PiH264Track(MediaStreamTrack):
         self._brightness = max(-100, min(100, int(value)))
         self.picam2.set_controls({"Brightness": self._brightness / 100.0})
 
+    def capture_snapshot(self):
+        """Return a JPEG snapshot grabbed straight from the camera. Safe to
+        call concurrently with the H.264 encoder — picamera2/libcamera
+        delivers a separate frame to the application without disturbing
+        the encoder pipeline."""
+        image = self.picam2.capture_image("main")
+        buf = io.BytesIO()
+        image.save(buf, format="JPEG", quality=85)
+        return buf.getvalue()
+
     @property
     def video(self):
         # MediaPlayer-shaped interface so the adapter can treat us like one.
@@ -128,8 +142,12 @@ class PiH264Track(MediaStreamTrack):
     def stop(self):
         super().stop()
         try:
-            if self._started:
-                self.picam2.stop_recording()
+            if self._encoder_started:
+                self.picam2.stop_encoder()
+        except Exception:
+            pass
+        try:
+            self.picam2.stop()
         except Exception:
             pass
         try:

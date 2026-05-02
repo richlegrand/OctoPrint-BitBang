@@ -68,7 +68,19 @@ try:
             flip_h = self._settings.get_boolean(["flip_horizontal"])
             flip_v = self._settings.get_boolean(["flip_vertical"])
 
-            if camera_device:
+            brightness = self._settings.get_int(["brightness"]) or 0
+
+            if camera_device == "picamera2":
+                w, h = (int(x) for x in camera_resolution.split("x"))
+                camera = {
+                    "type": "picamera2",
+                    "size": (w, h),
+                    "flip_horizontal": flip_h,
+                    "flip_vertical": flip_v,
+                    "brightness": brightness,
+                }
+                self._logger.info(f"Camera: picamera2 at {camera_resolution}")
+            elif camera_device:
                 camera = {
                     "type": "usb",
                     "device": camera_device,
@@ -76,6 +88,7 @@ try:
                     "options": {"framerate": "30", "video_size": camera_resolution},
                     "flip_horizontal": flip_h,
                     "flip_vertical": flip_v,
+                    "brightness": brightness,
                 }
                 self._logger.info(f"Camera: {camera_device} at {camera_resolution}")
             else:
@@ -83,10 +96,10 @@ try:
                 if camera:
                     camera["flip_horizontal"] = flip_h
                     camera["flip_vertical"] = flip_v
+                    camera["brightness"] = brightness
                     if camera["type"] == "picamera2":
                         w, h = (int(x) for x in camera_resolution.split("x"))
                         camera["size"] = (w, h)
-                        camera["brightness"] = self._settings.get_int(["brightness"]) or 0
                     else:
                         camera.setdefault("options", {})["video_size"] = camera_resolution
                     self._logger.info(f"Camera: {camera['type']} at {camera_resolution}")
@@ -228,7 +241,8 @@ try:
             if player is None or not hasattr(player, "set_brightness"):
                 return flask.jsonify({"error": "brightness not supported on this camera"}), 400
 
-            player.set_brightness(value)
+            if player.set_brightness(value) is False:
+                return flask.jsonify({"error": "brightness not supported on this camera"}), 400
             self._settings.set_int(["brightness"], value)
             self._settings.save()
             return flask.jsonify({"value": value})
@@ -238,6 +252,9 @@ try:
             """List available video capture devices."""
             import subprocess
             cameras = []
+            # Pi CSI camera surfaces through picamera2/libcamera, not v4l2-ctl
+            if getattr(self, "_picam2_sensor_size", None):
+                cameras.append({"device": "picamera2", "name": "Pi CSI camera"})
             try:
                 result = subprocess.run(
                     ["v4l2-ctl", "--list-devices"],
@@ -262,11 +279,13 @@ try:
             """List supported resolutions for a camera device."""
             import subprocess
             device = flask.request.args.get("device", "")
-            # Auto-detect: if picamera2 is available, use sensor-aware list
-            if not device:
+            # picamera2: explicit Pi CSI selection or auto-detect when present
+            if device == "picamera2" or not device:
                 picam_res = self._picamera2_resolutions()
                 if picam_res is not None:
                     return flask.jsonify(picam_res)
+                if device == "picamera2":
+                    return flask.jsonify([])
                 device = "/dev/video0"
             resolutions = []
             try:
@@ -279,9 +298,15 @@ try:
                     line = line.strip()
                     if line.startswith("Size: Discrete"):
                         res = line.split("Discrete")[1].strip()
-                        if res not in seen:
-                            seen.add(res)
-                            resolutions.append(res)
+                        if res in seen:
+                            continue
+                        seen.add(res)
+                        try:
+                            if int(res.split("x")[0]) > 1280:
+                                continue
+                        except ValueError:
+                            continue
+                        resolutions.append(res)
             except Exception as e:
                 self._logger.warning(f"Failed to list resolutions: {e}")
             # Sort by width
@@ -293,7 +318,6 @@ try:
         _PICAMERA2_STANDARD_RESOLUTIONS = [
             (640, 480), (800, 600),
             (1280, 720), (1280, 960),
-            (1920, 1080),
         ]
 
         def _picamera2_resolutions(self):
@@ -334,25 +358,28 @@ try:
 
         def take_webcam_snapshot(self, webcamName):
             """Grab a frame from the video track and return JPEG bytes."""
+            from octoprint.webcams import WebcamNotAbleToTakeSnapshotException
+
             if not self._adapter or not self._adapter.player or not self._adapter.player.video:
-                from octoprint.webcams import WebcamNotAbleToTakeSnapshotException
                 raise WebcamNotAbleToTakeSnapshotException(webcamName)
 
-            import io
-            loop = self._adapter._loop
-            if not loop:
-                from octoprint.webcams import WebcamNotAbleToTakeSnapshotException
-                raise WebcamNotAbleToTakeSnapshotException(webcamName)
-
-            future = asyncio.run_coroutine_threadsafe(
-                self._capture_frame(), loop
-            )
+            player = self._adapter.player
             try:
-                jpeg_bytes = future.result(timeout=5)
-                return iter([jpeg_bytes])
+                # Pi CSI: grab directly via picamera2 (no H.264 decode) so we
+                # stay within the Pi 4 CPU budget. USB falls through to the
+                # relay-based decoded-frame path.
+                if hasattr(player, "capture_snapshot"):
+                    return iter([player.capture_snapshot()])
+
+                loop = self._adapter._loop
+                if not loop:
+                    raise WebcamNotAbleToTakeSnapshotException(webcamName)
+                future = asyncio.run_coroutine_threadsafe(self._capture_frame(), loop)
+                return iter([future.result(timeout=5)])
+            except WebcamNotAbleToTakeSnapshotException:
+                raise
             except Exception as e:
                 self._logger.error(f"Snapshot failed: {e}")
-                from octoprint.webcams import WebcamNotAbleToTakeSnapshotException
                 raise WebcamNotAbleToTakeSnapshotException(webcamName)
 
         async def _capture_frame(self):

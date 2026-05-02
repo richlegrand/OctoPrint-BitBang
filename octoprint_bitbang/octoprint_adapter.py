@@ -6,7 +6,7 @@ Camera source is auto-detected or explicitly configured.
 """
 
 from bitbang import BitBangASGI
-from aiortc.contrib.media import MediaPlayer, MediaRelay
+from aiortc.contrib.media import MediaRelay
 
 from .camera import detect_camera
 
@@ -33,37 +33,19 @@ class OctoPrintBitBang(BitBangASGI):
             print("No camera - running in HTTP-only mode")
             return
 
-        if source["type"] == "rtsp":
-            # H.264 passthrough from camera-streamer (zero CPU)
-            try:
-                self.player = MediaPlayer(
-                    source["url"],
-                    format=source.get("format"),
-                    options=source.get("options", {}),
-                    decode=source.get("decode", True),
-                )
-                print(f"Opened RTSP camera: {source['url']}")
-            except Exception as e:
-                print(f"Warning: Could not open RTSP source: {e}")
-
-        elif source["type"] == "usb":
+        if source["type"] == "usb":
             # USB webcam (software H.264 encode via aiortc)
             try:
-                self.player = MediaPlayer(
-                    source["device"],
+                from .usb_camera_source import UsbCameraSource
+                self.player = UsbCameraSource(
+                    device=source["device"],
                     format=source.get("format"),
                     options=source.get("options", {}),
+                    brightness=source.get("brightness", 0),
+                    flip_horizontal=source.get("flip_horizontal", False),
+                    flip_vertical=source.get("flip_vertical", False),
                 )
                 print(f"Opened USB camera: {source['device']}")
-                if self.player.video and (
-                    source.get("flip_horizontal") or source.get("flip_vertical")
-                ):
-                    from .flip_track import FlippedTrack
-                    self.player.video = FlippedTrack(
-                        self.player.video,
-                        hflip=source.get("flip_horizontal", False),
-                        vflip=source.get("flip_vertical", False),
-                    )
             except Exception as e:
                 print(f"Warning: Could not open camera '{source['device']}': {e}")
 

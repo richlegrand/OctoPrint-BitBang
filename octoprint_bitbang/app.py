@@ -52,7 +52,7 @@ def main():
     parser.add_argument('--proxy',
                         help='Local server to proxy (e.g. localhost:5000)')
     parser.add_argument('--camera',
-                        help='Camera source override (e.g. /dev/video0, rtsp://...)')
+                        help='Camera source override (e.g. /dev/video0)')
     args = parser.parse_args()
 
     ws_target = None
@@ -66,21 +66,12 @@ def main():
 
     camera_source = None
     if args.camera:
-        if args.camera.startswith('rtsp://'):
-            camera_source = {
-                "type": "rtsp",
-                "url": args.camera,
-                "format": "rtsp",
-                "options": {"rtsp_transport": "tcp"},
-                "decode": False,
-            }
-        else:
-            camera_source = {
-                "type": "usb",
-                "device": args.camera,
-                "format": "v4l2",
-                "options": {"framerate": "30", "video_size": "640x480"},
-            }
+        camera_source = {
+            "type": "usb",
+            "device": args.camera,
+            "format": "v4l2",
+            "options": {"framerate": "30", "video_size": "640x480"},
+        }
 
     adapter = OctoPrintBitBang(
         asgi_app,

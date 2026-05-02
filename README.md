@@ -14,7 +14,7 @@ Most "OctoPrint remote access" solutions involve either a paid SaaS relay, a VPN
 - **One link, no accounts.** Share a URL like `https://bitba.ng/abc123…` — optionally gated behind a PIN — and the recipient sees the full OctoPrint UI through a WebRTC tunnel. No sign-up on either end.
 - **Live H.264 video.** Frames come straight from the camera, hardware-encoded on Pi 4 (`/dev/video11` V4L2 M2M) and software-encoded on Pi 5, then packetized by aiortc and delivered as a WebRTC video track. CPU footprint is low enough to leave plenty of headroom for a print.
 - **The whole OctoPrint UI.** HTTP, WebSockets (SockJS), file uploads, GCode viewer — all tunneled. Not just a minimal dashboard.
-- **Pi CSI camera or USB webcam.** Auto-detected (IMX477, IMX219, IMX708, or any V4L2-capable USB webcam). `camera-streamer` RTSP is also picked up automatically if you already run it.
+- **Pi CSI camera or USB webcam.** Auto-detected (IMX477, IMX219, IMX708, or any V4L2-capable USB webcam). BitBang opens the camera directly — disable `mjpg-streamer` / `camera-streamer` services first so the device isn't already held.
 - **Runtime camera controls.** Live brightness slider, image flip (H/V at the sensor level so it carries through snapshots and fullscreen), and resolution selection (VGA up to 1080p).
 - **Snapshots and timelapse.** Integrates with OctoPrint's `WebcamProviderPlugin` API — snapshots are grabbed from the live stream, so no second camera pipeline to configure.
 - **Mobile friendly.** Fullscreen, touch controls, shareable links work from phones.

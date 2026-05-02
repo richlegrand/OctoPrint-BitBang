@@ -56,10 +56,6 @@ Is picamera2 available?
            NO  -> HTTP-only mode (no video)
 ```
 
-Note: camera-streamer RTSP passthrough is also auto-detected if running
-on port 8554. This is a zero-CPU bonus for users who have it installed,
-but we don't depend on it.
-
 ## Implementation Steps
 
 ### Step 1: Build PiCameraTrack
@@ -239,5 +235,3 @@ https://github.com/OctoPrint/plugins.octoprint.org
 - **Multiple cameras**: Support multiple video tracks
 - **Bandwidth adaptation**: Dynamic resolution/framerate based on
   connection quality
-- **camera-streamer integration**: Already auto-detected if running.
-  Will be a zero-CPU bonus if camera-streamer becomes default on OctoPi.

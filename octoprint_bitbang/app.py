@@ -47,7 +47,7 @@ def main():
     import argparse
     from bitbang.adapter import add_bitbang_args, bitbang_kwargs
 
-    parser = argparse.ArgumentParser(description='OctoPrint via BitBang (prototype)')
+    parser = argparse.ArgumentParser(description='OctoPrint via BitBang')
     add_bitbang_args(parser)
     parser.add_argument('--proxy',
                         help='Local server to proxy (e.g. localhost:5000)')

@@ -208,14 +208,8 @@ try:
 
             sender = pc.addTrack(self._adapter.relay.subscribe(self._adapter.player.video))
 
-            # Force H.264 — our track yields pre-encoded H.264 av.Packets.
-            from aiortc.rtcrtpsender import RTCRtpSender
-            h264 = [c for c in RTCRtpSender.getCapabilities("video").codecs
-                    if c.name == "H264"]
-            for t in pc.getTransceivers():
-                if t.sender is sender:
-                    t.setCodecPreferences(h264)
-                    break
+            from .octoprint_adapter import force_h264
+            force_h264(pc, sender)
 
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)

@@ -203,65 +203,44 @@
         });
     }
 
-    if (isBitBang) {
-        // Remote mode: try data-bitbang-stream first (Python adapter has video).
-        // Fall back to local offer/answer if no track arrives (bitbangproxy).
-        function injectRemote() {
-            if (document.querySelector("video[data-bitbang-stream]")) return;
-            if (document.querySelector("video[data-bitbang-local]")) return;
-            var video = document.createElement("video");
-            video.setAttribute("data-bitbang-stream", "camera");
-            video.autoplay = true;
-            video.playsinline = true;
-            video.muted = true;
-            replaceWebcam(video);
+    function createVideo(attrs) {
+        var video = document.createElement("video");
+        video.autoplay = true;
+        video.playsinline = true;
+        video.muted = true;
+        for (var k in attrs) video.setAttribute(k, attrs[k]);
+        return video;
+    }
 
-            setTimeout(function () {
-                if (!video.srcObject) {
-                    console.log("[BitBang] No remote video track, falling back to local");
-                    video.removeAttribute("data-bitbang-stream");
-                    video.setAttribute("data-bitbang-local", "1");
-                    connectLocalVideo(video);
-                }
-            }, 5000);
-        }
-
+    function whenWebcamReady(callback) {
         if (document.readyState === "loading") {
-            document.addEventListener("DOMContentLoaded", injectRemote);
+            document.addEventListener("DOMContentLoaded", callback);
         } else {
-            injectRemote();
+            callback();
         }
-
         var observer = new MutationObserver(function () {
-            if (document.getElementById("webcam_image")) {
-                injectRemote();
+            if (document.getElementById("webcam_image") ||
+                document.getElementById("classicwebcam_container")) {
+                callback();
             }
         });
         observer.observe(document.body, { childList: true, subtree: true });
+    }
 
+    if (isBitBang) {
+        // Remote mode: bootstrap.js wires the track via data-bitbang-stream
+        whenWebcamReady(function () {
+            if (document.querySelector("video[data-bitbang-stream]")) return;
+            var video = createVideo({"data-bitbang-stream": "camera"});
+            replaceWebcam(video);
+        });
     } else {
-        function startLocalVideo() {
+        // Local mode: direct WebRTC to the plugin's signaling endpoint
+        whenWebcamReady(function () {
             if (document.querySelector("video[data-bitbang-local]")) return;
-            var video = document.createElement("video");
-            video.setAttribute("data-bitbang-local", "1");
-            video.autoplay = true;
-            video.playsinline = true;
-            video.muted = true;
+            var video = createVideo({"data-bitbang-local": "1"});
             if (!replaceWebcam(video)) return;
             connectLocalVideo(video);
-        }
-
-        if (document.readyState === "loading") {
-            document.addEventListener("DOMContentLoaded", startLocalVideo);
-        } else {
-            startLocalVideo();
-        }
-
-        var observer = new MutationObserver(function () {
-            if (document.getElementById("webcam_image")) {
-                startLocalVideo();
-            }
         });
-        observer.observe(document.body, { childList: true, subtree: true });
     }
 })();

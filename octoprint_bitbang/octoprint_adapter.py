@@ -11,6 +11,17 @@ from aiortc.contrib.media import MediaRelay
 from .camera import detect_camera
 
 
+def force_h264(pc, sender):
+    """Force H.264 codec on a transceiver so aiortc doesn't negotiate VP8."""
+    from aiortc.rtcrtpsender import RTCRtpSender
+    h264 = [c for c in RTCRtpSender.getCapabilities("video").codecs
+            if c.name == "H264"]
+    for t in pc.getTransceivers():
+        if t.sender is sender:
+            t.setCodecPreferences(h264)
+            break
+
+
 class OctoPrintBitBang(BitBangASGI):
     """BitBang adapter with camera video for OctoPrint remote access.
 
@@ -72,15 +83,7 @@ class OctoPrintBitBang(BitBangASGI):
         """Add camera video track to peer connection."""
         if self.player and self.player.video:
             sender = pc.addTrack(self.relay.subscribe(self.player.video))
-            # Our track yields pre-encoded H.264 av.Packets; force H.264-only
-            # so aiortc doesn't negotiate VP8 and packetize our bytes as VP8.
-            from aiortc.rtcrtpsender import RTCRtpSender
-            h264 = [c for c in RTCRtpSender.getCapabilities("video").codecs
-                    if c.name == "H264"]
-            for t in pc.getTransceivers():
-                if t.sender is sender:
-                    t.setCodecPreferences(h264)
-                    break
+            force_h264(pc, sender)
             print(f"Added camera video track for {client_id}")
 
     def get_stream_metadata(self):

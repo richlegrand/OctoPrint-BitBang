@@ -8,7 +8,19 @@
  *   plugin's /offer endpoint for H.264 video on the LAN
  */
 (function () {
-    var isBitBang = navigator.serviceWorker && navigator.serviceWorker.controller;
+    var isBitBang = !!window.__bbSessionId;
+
+    // Fix modals in BitBang iframe. OctoPrint uses position:absolute on
+    // modals which resolves against body content height. In the iframe,
+    // body is taller than viewport so modals appear off-screen.
+    if (isBitBang) {
+        var s = document.createElement('style');
+        s.textContent =
+            '.modal { position: fixed !important; top: 2% !important; ' +
+            'margin-top: 0 !important; max-height: 96vh !important; ' +
+            'overflow-y: auto !important; }';
+        document.head.appendChild(s);
+    }
 
     function addFullscreenButton(video) {
         var wrapper = document.createElement("div");

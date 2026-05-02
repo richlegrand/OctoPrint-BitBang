@@ -16,11 +16,11 @@
     if (isBitBang) {
         var s = document.createElement('style');
         s.textContent =
-            '.modal { position: fixed !important; top: 2% !important; ' +
+            '.modal[style*="display: block"] { position: fixed !important; top: 2% !important; ' +
             'margin-top: 0 !important; max-height: 96vh !important; ' +
             'display: flex !important; flex-direction: column !important; ' +
             'overflow: hidden !important; }' +
-            '.modal .modal-body { flex: 1 !important; overflow-y: auto !important; min-height: 0 !important; }';
+            '.modal[style*="display: block"] .modal-body { flex: 1 !important; overflow-y: auto !important; min-height: 0 !important; }';
         document.head.appendChild(s);
     }
 

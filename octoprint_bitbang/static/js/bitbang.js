@@ -18,7 +18,8 @@
         s.textContent =
             '.modal { position: fixed !important; top: 2% !important; ' +
             'margin-top: 0 !important; max-height: 96vh !important; ' +
-            'overflow-y: auto !important; }';
+            'overflow: hidden !important; }' +
+            '.modal .modal-body { max-height: 80vh !important; overflow-y: auto !important; }';
         document.head.appendChild(s);
     }
 

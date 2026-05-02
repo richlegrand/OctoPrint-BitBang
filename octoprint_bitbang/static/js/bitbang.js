@@ -157,16 +157,73 @@
         }, true);
     }
 
+    // Connect video via local offer/answer endpoint. Works on LAN and
+    // remotely (fetches TURN servers). Can be called with an existing
+    // video element (fallback from remote mode) or creates its own.
+    function connectLocalVideo(video) {
+        fetch("/plugin/bitbang/ice-servers").then(function (r) {
+            return r.json();
+        }).then(function (iceServers) {
+            var config = (iceServers && iceServers.length > 0) ? { iceServers: iceServers } : {};
+            var pc = new RTCPeerConnection(config);
+
+            pc.ontrack = function (event) {
+                if (event.streams && event.streams[0]) {
+                    video.srcObject = event.streams[0];
+                } else {
+                    if (!video.srcObject) video.srcObject = new MediaStream();
+                    video.srcObject.addTrack(event.track);
+                }
+            };
+
+            pc.addTransceiver("video", { direction: "recvonly" });
+
+            return pc.createOffer().then(function (offer) {
+                return pc.setLocalDescription(offer);
+            }).then(function () {
+                return fetch("/plugin/bitbang/offer", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        sdp: pc.localDescription.sdp,
+                        type: pc.localDescription.type
+                    })
+                });
+            }).then(function (response) {
+                return response.json();
+            }).then(function (answer) {
+                if (answer.error) {
+                    console.log("[BitBang] Local video not available:", answer.error);
+                    return;
+                }
+                return pc.setRemoteDescription(answer);
+            });
+        }).catch(function (err) {
+            console.log("[BitBang] Local video failed:", err);
+        });
+    }
+
     if (isBitBang) {
-        // Remote mode: bootstrap.js wires the track via data-bitbang-stream
+        // Remote mode: try data-bitbang-stream first (Python adapter has video).
+        // Fall back to local offer/answer if no track arrives (bitbangproxy).
         function injectRemote() {
             if (document.querySelector("video[data-bitbang-stream]")) return;
+            if (document.querySelector("video[data-bitbang-local]")) return;
             var video = document.createElement("video");
             video.setAttribute("data-bitbang-stream", "camera");
             video.autoplay = true;
             video.playsinline = true;
             video.muted = true;
             replaceWebcam(video);
+
+            setTimeout(function () {
+                if (!video.srcObject) {
+                    console.log("[BitBang] No remote video track, falling back to local");
+                    video.removeAttribute("data-bitbang-stream");
+                    video.setAttribute("data-bitbang-local", "1");
+                    connectLocalVideo(video);
+                }
+            }, 5000);
         }
 
         if (document.readyState === "loading") {
@@ -183,9 +240,6 @@
         observer.observe(document.body, { childList: true, subtree: true });
 
     } else {
-        // Local/proxy mode: direct WebRTC to the plugin's signaling endpoint.
-        // Fetches ICE servers (TURN) first so video works both on LAN and
-        // remotely through bitbangproxy.
         function startLocalVideo() {
             if (document.querySelector("video[data-bitbang-local]")) return;
             var video = document.createElement("video");
@@ -194,48 +248,7 @@
             video.playsinline = true;
             video.muted = true;
             if (!replaceWebcam(video)) return;
-
-            // Fetch ICE servers, then create peer connection
-            fetch("/plugin/bitbang/ice-servers").then(function (r) {
-                return r.json();
-            }).then(function (iceServers) {
-                var config = (iceServers && iceServers.length > 0) ? { iceServers: iceServers } : {};
-                var pc = new RTCPeerConnection(config);
-
-                pc.ontrack = function (event) {
-                    if (event.streams && event.streams[0]) {
-                        video.srcObject = event.streams[0];
-                    } else {
-                        if (!video.srcObject) video.srcObject = new MediaStream();
-                        video.srcObject.addTrack(event.track);
-                    }
-                };
-
-                pc.addTransceiver("video", { direction: "recvonly" });
-
-                return pc.createOffer().then(function (offer) {
-                    return pc.setLocalDescription(offer);
-                }).then(function () {
-                    return fetch("/plugin/bitbang/offer", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            sdp: pc.localDescription.sdp,
-                            type: pc.localDescription.type
-                        })
-                    });
-                }).then(function (response) {
-                    return response.json();
-                }).then(function (answer) {
-                    if (answer.error) {
-                        console.log("[BitBang] Local video not available:", answer.error);
-                        return;
-                    }
-                    return pc.setRemoteDescription(answer);
-                });
-            }).catch(function (err) {
-                console.log("[BitBang] Local video failed:", err);
-            });
+            connectLocalVideo(video);
         }
 
         if (document.readyState === "loading") {

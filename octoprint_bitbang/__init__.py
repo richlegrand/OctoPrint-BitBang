@@ -129,6 +129,12 @@ try:
 
         # -- Local WebRTC video signaling --
 
+        @octoprint.plugin.BlueprintPlugin.route("/ice-servers", methods=["GET"])
+        def get_ice_servers(self):
+            """Return TURN/STUN servers for local video WebRTC."""
+            servers = self._adapter.get_ice_servers() if self._adapter else []
+            return flask.jsonify(servers)
+
         @octoprint.plugin.BlueprintPlugin.route("/offer", methods=["POST"])
         @octoprint.plugin.BlueprintPlugin.csrf_exempt()
         def local_offer(self):
@@ -146,11 +152,14 @@ try:
             if not loop:
                 return flask.jsonify({"error": "not ready"}), 503
 
+            ice_servers = self._adapter.get_ice_servers()
+
             future = asyncio.run_coroutine_threadsafe(
-                self._handle_local_offer(offer_sdp, offer_type), loop
+                self._handle_local_offer(offer_sdp, offer_type, ice_servers), loop
             )
             try:
                 answer = future.result(timeout=10)
+                answer['ice_servers'] = ice_servers
                 return flask.jsonify(answer)
             except Exception as e:
                 self._logger.error(f"Local WebRTC offer failed: {e}")
@@ -178,9 +187,10 @@ try:
                 out.append(line)
             return "\r\n".join(out)
 
-        async def _handle_local_offer(self, offer_sdp, offer_type):
+        async def _handle_local_offer(self, offer_sdp, offer_type, ice_servers=None):
             offer_sdp = self._strip_non_h264(offer_sdp)
-            pc = RTCPeerConnection()
+            config = self._adapter._build_rtc_config(ice_servers) if ice_servers else None
+            pc = RTCPeerConnection(config) if config else RTCPeerConnection()
             self._local_pcs.add(pc)
 
             @pc.on("connectionstatechange")

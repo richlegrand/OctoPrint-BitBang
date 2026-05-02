@@ -183,7 +183,9 @@
         observer.observe(document.body, { childList: true, subtree: true });
 
     } else {
-        // Local mode: direct WebRTC to the plugin's signaling endpoint
+        // Local/proxy mode: direct WebRTC to the plugin's signaling endpoint.
+        // Fetches ICE servers (TURN) first so video works both on LAN and
+        // remotely through bitbangproxy.
         function startLocalVideo() {
             if (document.querySelector("video[data-bitbang-local]")) return;
             var video = document.createElement("video");
@@ -193,39 +195,44 @@
             video.muted = true;
             if (!replaceWebcam(video)) return;
 
-            var pc = new RTCPeerConnection();
+            // Fetch ICE servers, then create peer connection
+            fetch("/plugin/bitbang/ice-servers").then(function (r) {
+                return r.json();
+            }).then(function (iceServers) {
+                var config = (iceServers && iceServers.length > 0) ? { iceServers: iceServers } : {};
+                var pc = new RTCPeerConnection(config);
 
-            pc.ontrack = function (event) {
-                if (event.streams && event.streams[0]) {
-                    video.srcObject = event.streams[0];
-                } else {
-                    if (!video.srcObject) video.srcObject = new MediaStream();
-                    video.srcObject.addTrack(event.track);
-                }
-            };
+                pc.ontrack = function (event) {
+                    if (event.streams && event.streams[0]) {
+                        video.srcObject = event.streams[0];
+                    } else {
+                        if (!video.srcObject) video.srcObject = new MediaStream();
+                        video.srcObject.addTrack(event.track);
+                    }
+                };
 
-            // Need to add a transceiver to receive video
-            pc.addTransceiver("video", { direction: "recvonly" });
+                pc.addTransceiver("video", { direction: "recvonly" });
 
-            pc.createOffer().then(function (offer) {
-                return pc.setLocalDescription(offer);
-            }).then(function () {
-                return fetch("/plugin/bitbang/offer", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        sdp: pc.localDescription.sdp,
-                        type: pc.localDescription.type
-                    })
+                return pc.createOffer().then(function (offer) {
+                    return pc.setLocalDescription(offer);
+                }).then(function () {
+                    return fetch("/plugin/bitbang/offer", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            sdp: pc.localDescription.sdp,
+                            type: pc.localDescription.type
+                        })
+                    });
+                }).then(function (response) {
+                    return response.json();
+                }).then(function (answer) {
+                    if (answer.error) {
+                        console.log("[BitBang] Local video not available:", answer.error);
+                        return;
+                    }
+                    return pc.setRemoteDescription(answer);
                 });
-            }).then(function (response) {
-                return response.json();
-            }).then(function (answer) {
-                if (answer.error) {
-                    console.log("[BitBang] Local video not available:", answer.error);
-                    return;
-                }
-                return pc.setRemoteDescription(answer);
             }).catch(function (err) {
                 console.log("[BitBang] Local video failed:", err);
             });

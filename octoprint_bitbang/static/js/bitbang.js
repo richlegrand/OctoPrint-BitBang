@@ -18,8 +18,9 @@
         s.textContent =
             '.modal { position: fixed !important; top: 2% !important; ' +
             'margin-top: 0 !important; max-height: 96vh !important; ' +
+            'display: flex !important; flex-direction: column !important; ' +
             'overflow: hidden !important; }' +
-            '.modal .modal-body { max-height: 80vh !important; overflow-y: auto !important; }';
+            '.modal .modal-body { flex: 1 !important; overflow-y: auto !important; min-height: 0 !important; }';
         document.head.appendChild(s);
     }
 

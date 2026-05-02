@@ -1,4 +1,4 @@
-<a id="bitbang_navbar_link" href="javascript:void(0)" title="BitBang remote access" onclick="
+<a id="bitbang_navbar_link" href="javascript:void(0)" title="BitBang remote access" style="display:none" onclick="
     fetch('/api/settings')
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -13,3 +13,17 @@
 ">
     <i id="bitbang_navbar_icon" class="fas fa-link"></i> <span class="hidden-phone">BitBang</span>
 </a>
+<script>
+(function () {
+    fetch('/api/settings')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var enabled = data.plugins && data.plugins.bitbang && data.plugins.bitbang.enabled;
+            if (enabled) {
+                var link = document.getElementById('bitbang_navbar_link');
+                if (link) link.style.display = '';
+            }
+        })
+        .catch(function () {});
+})();
+</script>

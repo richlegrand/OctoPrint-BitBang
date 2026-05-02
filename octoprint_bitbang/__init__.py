@@ -16,7 +16,6 @@ try:
     from .camera import detect_camera
 
     import flask
-    import json
     import asyncio
     from aiortc import RTCPeerConnection, RTCSessionDescription
     from aiortc.contrib.media import MediaRelay

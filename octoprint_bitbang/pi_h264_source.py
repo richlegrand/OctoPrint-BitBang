@@ -82,11 +82,11 @@ class PiH264Track(MediaStreamTrack):
         # before any WebRTC client connects — needed for timelapse snapshots.
         self.picam2.start()
 
-        # iperiod = framerate → 1s GOP. repeat=True → SPS/PPS before each IDR
-        # so late-joining WebRTC subscribers can start decoding quickly.
+        # Let the encoder pick its own GOP length (V4L2 default is ~60
+        # frames on Pi 4). repeat=True → SPS/PPS before each IDR so late-
+        # joining WebRTC subscribers can start decoding when one arrives.
         self.encoder = H264Encoder(
             bitrate=bitrate,
-            iperiod=framerate,
             repeat=True,
             profile="baseline",
         )
@@ -98,22 +98,10 @@ class PiH264Track(MediaStreamTrack):
     def _ensure_started(self):
         if self._encoder_started:
             return
-        loop = asyncio.get_running_loop()
         self._queue = asyncio.Queue(maxsize=30)
-        self._output = _QueueOutput(loop, self._queue)
+        self._output = _QueueOutput(asyncio.get_running_loop(), self._queue)
         self.picam2.start_encoder(self.encoder, self._output)
         self._encoder_started = True
-        # V4L2 hw encoder on Pi 4 doesn't honor iperiod reliably; force a
-        # keyframe every second so late-joining WebRTC peers can sync.
-        self._keyframe_task = loop.create_task(self._keyframe_loop())
-
-    async def _keyframe_loop(self):
-        try:
-            while True:
-                await asyncio.sleep(1.0)
-                self.encoder.force_key_frame()
-        except asyncio.CancelledError:
-            pass
 
     async def recv(self):
         self._ensure_started()
@@ -128,10 +116,15 @@ class PiH264Track(MediaStreamTrack):
         """Return a JPEG snapshot grabbed straight from the camera. Safe to
         call concurrently with the H.264 encoder — picamera2/libcamera
         delivers a separate frame to the application without disturbing
-        the encoder pipeline."""
-        image = self.picam2.capture_image("main")
+        the encoder pipeline. Uses request.save's YUV420→JPEG fast path
+        (simplejpeg.encode_jpeg_yuv_planes) so we never go through PIL,
+        which doesn't support a YUV420 mode."""
         buf = io.BytesIO()
-        image.save(buf, format="JPEG", quality=85)
+        request = self.picam2.capture_request()
+        try:
+            request.save("main", buf, format="jpeg")
+        finally:
+            request.release()
         return buf.getvalue()
 
     @property

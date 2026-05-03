@@ -81,6 +81,10 @@ class OctoPrintBitBang(BitBangASGI):
 
     def setup_peer_connection(self, pc, client_id):
         """Add camera video track to peer connection."""
+        # TEMP: video track disabled to test whether RTP+SCTP-on-same-transport
+        # is starving the data channel on direct LAN. Restore when done.
+        print(f"[TEMP] Video track NOT added for {client_id} (diagnostic)")
+        return
         if self.player and self.player.video:
             sender = pc.addTrack(self.relay.subscribe(self.player.video))
             force_h264(pc, sender)

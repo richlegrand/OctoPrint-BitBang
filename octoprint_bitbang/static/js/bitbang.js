@@ -112,7 +112,9 @@
                 style.id = "bitbang-hide-classicwebcam";
                 style.textContent =
                     "#webcam_video_container, #webcam_img_container " +
-                    "{ display: none !important; }";
+                    "{ display: none !important; }" +
+                    "#classicwebcam_container " +
+                    "{ padding: 0 !important; line-height: 0 !important; font-size: 0 !important; }";
                 document.head.appendChild(style);
             }
             classicContainer.appendChild(video);

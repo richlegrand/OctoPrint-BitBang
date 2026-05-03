@@ -97,6 +97,7 @@
     function replaceWebcam(video) {
         video.style.width = "100%";
         video.style.backgroundColor = "#000";
+        video.style.display = "block";
 
         // OctoPrint 1.11+ Classic Webcam hides its default containers until
         // a stream URL is configured. Mount into the outer container so

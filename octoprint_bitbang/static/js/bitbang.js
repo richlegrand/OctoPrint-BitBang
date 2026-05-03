@@ -12,7 +12,7 @@
 
     function addFullscreenButton(video) {
         var wrapper = document.createElement("div");
-        wrapper.style.cssText = "position:relative;display:inline-block;width:100%;pointer-events:auto";
+        wrapper.style.cssText = "position:relative;display:block;width:100%;pointer-events:auto";
 
         var btn = document.createElement("button");
         btn.className = "btn btn-mini";

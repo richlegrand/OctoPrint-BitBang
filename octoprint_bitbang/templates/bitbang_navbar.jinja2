@@ -3,8 +3,11 @@
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var url = data.plugins && data.plugins.bitbang && data.plugins.bitbang.url;
-            if (!url) { alert('BitBang URL not available yet'); return; }
-            window.bbShowUrlDialog && window.bbShowUrlDialog(url);
+            if (url) {
+                prompt('BitBang URL (Ctrl+C to copy):', url);
+            } else {
+                alert('BitBang URL not available yet');
+            }
         })
         .catch(function() { alert('Could not load settings'); });
 ">
@@ -22,50 +25,5 @@
             }
         })
         .catch(function () {});
-
-    // Custom modal so the URL is always selectable (alert text isn't on mobile)
-    // and we can show a clear "Copied" state when the clipboard API works.
-    window.bbShowUrlDialog = function (url) {
-        var existing = document.getElementById('bb-url-modal');
-        if (existing) existing.remove();
-
-        var overlay = document.createElement('div');
-        overlay.id = 'bb-url-modal';
-        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:99999;';
-
-        var box = document.createElement('div');
-        box.style.cssText = 'background:#fff;color:#333;padding:20px;border-radius:6px;max-width:90%;width:480px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
-        box.innerHTML =
-            '<div style="font-size:14px;margin-bottom:10px;">BitBang URL</div>' +
-            '<input type="text" readonly style="width:100%;padding:6px 8px;font-size:13px;border:1px solid #ccc;border-radius:3px;box-sizing:border-box;">' +
-            '<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">' +
-              '<button id="bb-copy-btn" style="padding:6px 14px;font-size:14px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;">Copy</button>' +
-              '<button id="bb-ok-btn" style="padding:6px 14px;font-size:14px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;">OK</button>' +
-            '</div>';
-
-        overlay.appendChild(box);
-        document.body.appendChild(overlay);
-
-        var input = box.querySelector('input');
-        input.value = url;
-        // Focus + select so desktop users can immediately Ctrl+C; mobile
-        // users can long-press the input to bring up the system copy menu.
-        setTimeout(function () { input.focus(); input.select(); }, 0);
-
-        var copyBtn = document.getElementById('bb-copy-btn');
-        copyBtn.onclick = function () {
-            input.focus(); input.select();
-            var done = function () { copyBtn.textContent = 'Copied'; setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500); };
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(url).then(done, function () {
-                    try { document.execCommand('copy'); done(); } catch (e) {}
-                });
-            } else {
-                try { document.execCommand('copy'); done(); } catch (e) {}
-            }
-        };
-        document.getElementById('bb-ok-btn').onclick = function () { overlay.remove(); };
-        overlay.onclick = function (e) { if (e.target === overlay) overlay.remove(); };
-    };
 })();
 </script>

@@ -3,10 +3,14 @@
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var url = data.plugins && data.plugins.bitbang && data.plugins.bitbang.url;
-            if (url) {
-                prompt('BitBang URL (Ctrl+C to copy):', url);
+            if (!url) { alert('BitBang URL not available yet'); return; }
+            var done = function() { alert('BitBang URL (copied to clipboard):\n\n' + url); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(done, function() {
+                    alert('BitBang URL:\n\n' + url);
+                });
             } else {
-                alert('BitBang URL not available yet');
+                alert('BitBang URL:\n\n' + url);
             }
         })
         .catch(function() { alert('Could not load settings'); });

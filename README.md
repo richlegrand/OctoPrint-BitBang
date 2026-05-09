@@ -3,7 +3,9 @@
 
 This is an [Octoprint](https://octoprint.org/) plug-in that offers full remote access to your OctoPrint instance including live H.264 video over a single HTTPS shareable link. It uses [BitBang](https://github.com/richlegrand/bitbang) which creates a secure, fast peer-to-peer connection that requires no account, no subscription, port forwarding, tunnel, or VPN.
 
-[[BitBang]] https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/octoprint_bitbang.mp4
+<video src="https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/ocotoprint_bitbang.mp4" controls="controls" autoplay="autoplay" loop="loop" muted="muted" style="max-width:100%;">
+  Your browser does not support the video tag.
+</video>
 
 ## What you get
 
@@ -41,13 +43,19 @@ Restart OctoPrint.
 
 1. Open **Settings → BitBang**.
 2. Choose camera from dropdown.
+
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/camera_select.png)
+
 3. Choose resolution.
+
 ![Resolution dropdown](https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/resolution_select.png)
+
 4. (Optional) set a PIN.
 5. Save and **restart OctoPrint**.
 6. A button labeled BitBang is available in the menu bar -- click it for the URL.
+
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/bitbang_select.png)
+
 ![BitBang URL](https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/bitbang_url.png)
 
 

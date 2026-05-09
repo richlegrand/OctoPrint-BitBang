@@ -1,8 +1,9 @@
+
 # OctoPrint-BitBang
 
-This is an [Octoprint](https://octoprint.org/) plug-in that offers full remote access to your OctoPrint instance including live H.264 video over a single HTTPS shareable link. It benefits from the [BitBang](https://github.com/richlegrand/bitbang) features -- a secure, fast peer-to-peer connection that requires no account, no subscription, no port forwarding, no tunnel, and no VPN.
+This is an [Octoprint](https://octoprint.org/) plug-in that offers full remote access to your OctoPrint instance including live H.264 video over a single HTTPS shareable link. It uses [BitBang](https://github.com/richlegrand/bitbang) which creates a secure, fast peer-to-peer connection that requires no account, no subscription, port forwarding, tunnel, or VPN.
 
-TODO video
+[[BitBang]] https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/octoprint_bitbang.mp4
 
 ## What you get
 
@@ -13,7 +14,7 @@ TODO video
 - **Pi CSI camera or USB webcam:** Auto-detected (IMX477, IMX219, IMX708, or any V4L2-capable USB webcam). `camera-streamer` RTSP is also picked up automatically if you already run it.
 - **Camera controls:** Camera selection, live brightness slider, fullscreen button, image flip H/V buttons, and resolution selection (VGA up to 720p).
 - **Snapshots and timelapse:** Integrates with OctoPrint's `WebcamProviderPlugin` API -- snapshots are grabbed from the live stream, so no second camera pipeline to configure.
-- **Mobile friendly:** Fullscreen, touch controls, shareable links work from phones.
+- **Mobile friendly:** Shareable links work from phones.
 - **PIN protection:** Optional PIN required to access the remote URL.
 
 ## Installation
@@ -39,13 +40,18 @@ Restart OctoPrint.
 ## Usage
 
 1. Open **Settings → BitBang**.
-2. Confirm the detected camera and pick a resolution.
-3. (Optional) set a PIN.
-4. Save and **restart OctoPrint**.
-5. After restart, the BitBang remote URL is available in the menu bar (e.g. `https://bitba.ng/abc123…`).
-TODO image
+2. Choose camera from dropdown.
+![Camera dropdown](https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/camera_select.png)
+3. Choose resolution.
+![Resolution dropdown](https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/resolution_select.png)
+4. (Optional) set a PIN.
+5. Save and **restart OctoPrint**.
+6. A button labeled BitBang is available in the menu bar -- click it for the URL.
+![Camera dropdown](https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/bitbang_select.png)
+![BitBang URL](https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/bitbang_url.png)
 
-Whoever opens that URL -- on desktop or mobile -- sees the full OctoPrint UI with the live video feed. Close the tab and the P2P connection tears down.
+
+This URL can be shared and allows remote access to your printer.
 
 ## Configuration
 
@@ -55,17 +61,15 @@ All settings live in **Settings → BitBang**:
 |---|---|
 | Enabled | Toggle BitBang remote access |
 | PIN | Optional 4+ digit PIN prompt on the remote URL |
-| Camera | Auto-detect, or pin to a specific `/dev/video*` |
-| Resolution | VGA → 720p (filtered to what your sensor supports) |
+| Camera | Auto-detect, or select from dropdown list |
+| Resolution | VGA → HD (depending on what selected camera supports) |
 | Flip horizontal / vertical | Flip video if necessary |
 
-Camera settings take effect on OctoPrint restart. Full-screen button and brightness slider are overlaid on the video window (Control tab) and update immediately.
+All settings take effect on OctoPrint restart. Full-screen button and brightness slider are overlaid on the video window (Control tab) and update immediately.
 
 ## How it works
 
-TODO image
-
-- The `bitbang` Python package handles WebRTC signaling, identity, and the ASGI interface.
+- The `bitbang-python` package handles WebRTC signaling, identity, and the ASGI interface.
 - This plugin wraps it with OctoPrint integration: settings UI, `WebcamProviderPlugin` hooks, camera auto-detect, CSRF-safe cookie handling, and the JavaScript that injects the `<video>` element into OctoPrint's Control tab.
 - The bitba.ng cloud acts purely as a signaling relay to broker a direct connection. If a direct connection isn't available, bitba.ng will use TURN instead.
 
@@ -81,4 +85,4 @@ MIT. See [LICENSE](LICENSE).
 
 ## Credits
 
-Built on [aiortc](https://github.com/aiortc/aiortc), [picamera2](https://github.com/raspberrypi/picamera2), and the [bitbang](https://github.com/richlegrand/bitbang-python) library. Plugin scaffold uses OctoPrint's [plugin API](https://docs.octoprint.org/en/master/plugins/).
+Built on [aiortc](https://github.com/aiortc/aiortc), [picamera2](https://github.com/raspberrypi/picamera2), and the [bitbang-python](https://github.com/richlegrand/bitbang-python) library. Plugin scaffold uses OctoPrint's [plugin API](https://docs.octoprint.org/en/master/plugins/).

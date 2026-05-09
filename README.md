@@ -3,7 +3,7 @@
 
 This is an [Octoprint](https://octoprint.org/) plug-in that offers full remote access to your OctoPrint instance including live H.264 video over a single HTTPS shareable link. It uses [BitBang](https://github.com/richlegrand/bitbang) which creates a secure, fast peer-to-peer connection that requires no account, no subscription, port forwarding, tunnel, or VPN.
 
-<video src="https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/ocotoprint_bitbang.mp4" controls="controls" autoplay="autoplay" loop="loop" muted="muted" style="max-width:100%;">
+<video src="https://raw.githubusercontent.com/richlegrand/Octoprint-BitBang/refs/heads/main/assets/octoprint_bitbang.mp4" controls="controls" autoplay="autoplay" loop="loop" muted="muted" style="max-width:100%;">
   Your browser does not support the video tag.
 </video>
 

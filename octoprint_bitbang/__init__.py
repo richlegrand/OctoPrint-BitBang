@@ -5,6 +5,7 @@ No account, no subscription, no port forwarding. One shareable link.
 """
 
 __plugin_name__ = "BitBang"
+__plugin_version__ = "0.1.1"
 __plugin_pythoncompat__ = ">=3.7,<4"
 
 try:

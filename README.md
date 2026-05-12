@@ -1,34 +1,36 @@
 
 # OctoPrint-BitBang
 
-This is an [OctoPrint](https://octoprint.org/) plug-in that offers full remote access to your OctoPrint instance including live H.264 video over a single HTTPS shareable link. It uses [BitBang](https://github.com/richlegrand/bitbang) which creates a secure, fast peer-to-peer connection that requires no account, no subscription, port forwarding, tunnel, or VPN.
+This is an [OctoPrint](https://octoprint.org/) plugin that offers full remote access to your OctoPrint instance including live H.264 video over a single HTTPS shareable link. It uses [BitBang](https://github.com/richlegrand/bitbang) which creates a secure, fast peer-to-peer connection that requires no account, no subscription, port forwarding, tunnel, or VPN.
 
-![BitBang plug-in](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/octoprint_bitbang.webp)
+![BitBang plugin](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/octoprint_bitbang.webp)
 
+
+This is part of the [BitBang project](https://github.com/richlegrand/bitbang). 
 
 ## What you get
 
 - **Full remote access:** You get full access from anywhere through a secure HTTPS URL. Configure, upload G-code, start jobs, see live video, etc. 
-- **One link, no account set-up:** Share the URL `https://bitba.ng/abc123…`, optionally gated behind a PIN, and share your printer.  
+- **One link, no account set-up:** Remote access, share the URL, share your printer.
 - **Live H.264 video:** Frames come straight from the camera, hardware-encoded on Pi 4 (`/dev/video11` V4L2 M2M) and software-encoded on Pi 5 or x86-64 computer, then packetized by aiortc and delivered as a WebRTC media stream. CPU footprint is around 40% (single core) on Pi4. 
-- **BitBang access is optional:** Video streaming works for local access through local network URL.
-- **Pi CSI camera or USB webcam:** Auto-detected (IMX477, IMX219, IMX708, or any V4L2-capable USB webcam). `camera-streamer` RTSP is also picked up automatically if you already run it.
+- **BitBang URL access is optional:** Video streaming works with local access through local network URL also.
+- **Pi CSI camera or USB webcam:** Auto-detected (IMX477, IMX219, IMX708, or any V4L2-capable USB webcam). 
 - **Camera controls:** Camera selection, live brightness slider, fullscreen button, image flip H/V buttons, and resolution selection (VGA up to 720p).
 - **Snapshots and timelapse:** Integrates with OctoPrint's `WebcamProviderPlugin` API -- snapshots are grabbed from the live stream, so no second camera pipeline to configure.
-- **Mobile friendly:** Shareable links work from phones.
+- **Mobile friendly:** BitBang URL works with phones/tablets.
 - **PIN protection:** Optional PIN required to access the remote URL.
 
 ## Installation
 
-### Plugin Manager (recommended)
+[//]: # ### Plugin Manager (recommended)
 
-Settings → Plugin Manager → Get More → "… from URL" →
+[//]: # Settings → Plugin Manager → Get More → "… from URL" →
 
-```
-https://github.com/richlegrand/OctoPrint-BitBang/archive/main.zip
-```
+[//]: # ```
+[//]: # https://github.com/richlegrand/OctoPrint-BitBang/archive/main.zip
+[//]: # ```
 
-### Manual
+[//]: # ### Manual
 
 Inside your OctoPrint venv:
 
@@ -40,7 +42,8 @@ Restart OctoPrint.
 
 ## Usage
 
-1. Open **Settings → BitBang**.
+0. If you are using a separate program for camera streaming (e.g. camera-streamer, mjpg-streamer, ustreamer) you should stop these processes before running BitBang plugin to avoid camera access contention. 
+1. Point your browser to your local OctoPrint server. Open **Settings → BitBang**.
 2. Choose camera from dropdown.
 
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/camera_select.png)
@@ -49,16 +52,16 @@ Restart OctoPrint.
 
 ![Resolution dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/resolution_select.png)
 
-4. (Optional) set a PIN.
+4. Set a PIN (Optional).
 5. Save and **restart OctoPrint**.
-6. A button labeled BitBang is available in the menu bar -- click it for the URL.
+6. Refresh the OctoPrint tab in your browser. A button labeled BitBang is available in the menu bar -- click it for the URL.
 
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/bitbang_select.png)
 
 ![BitBang URL](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/bitbang_url.png)
 
 
-This URL can be shared and allows remote access to your printer.
+This URL allows remote access to your printer.
 
 ## Configuration
 
@@ -93,3 +96,7 @@ MIT. See [LICENSE](LICENSE).
 ## Credits
 
 Built on [aiortc](https://github.com/aiortc/aiortc), [picamera2](https://github.com/raspberrypi/picamera2), and the [bitbang-python](https://github.com/richlegrand/bitbang-python) library. Plugin scaffold uses OctoPrint's [plugin API](https://docs.octoprint.org/en/master/plugins/).
+
+## Contributing
+
+This is a one-person project. Issues and PRs are welcome and genuinely appreciated. I'll do my best to respond promptly.

@@ -4,12 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "OctoPrint-BitBang"
-version = "0.1.0"
+version = "0.1.1"
 description = "Remote OctoPrint access with live H.264 video via BitBang WebRTC"
 readme = "README.md"
 license = "MIT"
-authors = [{name = "Rich LeGrand"}]
+authors = [{name = "Rich LeGrand", email = "rich.m.legrand@gmail.com"}]
 requires-python = ">=3.10"
+keywords = ["octoprint", "octoprint-plugin", "bitbang", "webrtc", "remote-access", "3d-printing", "h264", "raspberry-pi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Plugins",
+    "Environment :: Web Environment",
+    "Framework :: Flask",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Printing",
+    "Topic :: Multimedia :: Video",
+]
 dependencies = [
     "bitbang>=0.1.46",
     "aiohttp>=3.8.0",
@@ -26,10 +41,15 @@ bitbang = "octoprint_bitbang"
 [project.urls]
 Homepage = "https://github.com/richlegrand/OctoPrint-BitBang"
 Source = "https://github.com/richlegrand/OctoPrint-BitBang"
+Issues = "https://github.com/richlegrand/OctoPrint-BitBang/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["octoprint_bitbang*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.html", "static/*.png", "static/js/*.js", "templates/*.jinja2"]
+octoprint_bitbang = [
+    "*.html",
+    "static/**/*",
+    "templates/**/*",
+]

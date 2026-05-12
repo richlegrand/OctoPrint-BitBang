@@ -6,6 +6,10 @@ No account, no subscription, no port forwarding. One shareable link.
 
 __plugin_name__ = "BitBang"
 __plugin_version__ = "0.1.1"
+__plugin_description__ = "Remote OctoPrint access with live H.264 video via BitBang WebRTC. No account, no port forwarding, one shareable link."
+__plugin_url__ = "https://github.com/richlegrand/OctoPrint-BitBang"
+__plugin_author__ = "Rich LeGrand"
+__plugin_license__ = "MIT"
 __plugin_pythoncompat__ = ">=3.7,<4"
 
 try:
@@ -439,7 +443,7 @@ try:
             ]
 
         def get_template_vars(self):
-            return {"plugin_version": "0.1.0"}
+            return {"plugin_version": __plugin_version__}
 
         def get_assets(self):
             return {
@@ -453,6 +457,31 @@ try:
             return True
 
     __plugin_implementation__ = BitBangPlugin()
+
+    def __plugin_check__():
+        return True
+
+    def _get_update_information():
+        return {
+            "bitbang": {
+                "displayName": __plugin_name__,
+                "displayVersion": __plugin_version__,
+                "type": "github_release",
+                "user": "richlegrand",
+                "repo": "OctoPrint-BitBang",
+                "current": __plugin_version__,
+                "stable_branch": {
+                    "name": "Stable",
+                    "branch": "main",
+                    "commitish": ["main"],
+                },
+                "pip": "https://github.com/richlegrand/OctoPrint-BitBang/archive/{target_version}.zip",
+            }
+        }
+
+    __plugin_hooks__ = {
+        "octoprint.plugin.softwareupdate.check_config": _get_update_information,
+    }
 
 except ImportError:
     # OctoPrint not installed - standalone CLI mode

@@ -12,7 +12,7 @@ This is part of the [BitBang project](https://github.com/richlegrand/bitbang).
 
 - **Full remote access:** You get full access from anywhere through a secure HTTPS URL. Configure, upload G-code, start jobs, see live video, etc. 
 - **One link, no account set-up:** Remote access, share the URL, share your printer.
-- **Live H.264 video:** Frames come straight from the camera, hardware-encoded on Pi 4 (`/dev/video11` V4L2 M2M) and software-encoded on Pi 5 or x86-64 computer, then packetized by aiortc and delivered as a WebRTC media stream. CPU footprint is around 40% (single core) on Pi4. 
+- **Live H.264 video:** Frames come straight from the camera, hardware-encoded on Pi 4 (`/dev/video11` V4L2 M2M) and software-encoded on Pi 5 or any other Linux host, then packetized by aiortc and delivered as a WebRTC media stream. CPU footprint is around 40% (single core) on Pi4. 
 - **BitBang URL access is optional:** Video streaming works with local access through local network URL also.
 - **Pi CSI camera or USB webcam:** Auto-detected (IMX477, IMX219, IMX708, or any V4L2-capable USB webcam). 
 - **Camera controls:** Camera selection, live brightness slider, fullscreen button, image flip H/V buttons, and resolution selection (VGA up to 720p).
@@ -22,17 +22,19 @@ This is part of the [BitBang project](https://github.com/richlegrand/bitbang).
 
 ## Installation
 
-[//]: # ### Plugin Manager (recommended)
+### Plugin Manager (recommended)
 
-[//]: # Settings → Plugin Manager → Get More → "… from URL" →
+In OctoPrint: **Settings → Plugin Manager → Get More → "… from URL"**, then paste:
 
-[//]: # ```
-[//]: # https://github.com/richlegrand/OctoPrint-BitBang/archive/main.zip
-[//]: # ```
+```
+https://github.com/richlegrand/OctoPrint-BitBang/archive/main.zip
+```
 
-[//]: # ### Manual
+Click **Install**, then restart OctoPrint when prompted.
 
-Inside your OctoPrint venv:
+### pip
+
+If you prefer the command line, inside your OctoPrint venv:
 
 ```bash
 pip install OctoPrint-BitBang
@@ -83,10 +85,23 @@ All settings take effect on OctoPrint restart. Full-screen button and brightness
 - This plugin wraps it with OctoPrint integration: settings UI, `WebcamProviderPlugin` hooks, camera auto-detect, CSRF-safe cookie handling, and the JavaScript that injects the `<video>` element into OctoPrint's Control tab.
 - The bitba.ng cloud acts purely as a signaling relay to broker a direct connection. If a direct connection isn't available, bitba.ng will use TURN instead.
 
+## Privacy
+
+The BitBang plugin connects through the `bitba.ng` cloud signaling service to broker peer-to-peer connections. Here is what `bitba.ng` does and does not see:
+
+- **Signaling:** When the plugin starts, it registers with `bitba.ng` using a public key derived from a locally-generated keypair (the private key never leaves your device). `bitba.ng` sees this public key, the derived UID that becomes part of your URL, and connection metadata (timestamps, IPs of peers attempting to connect).
+- **Media path:** Once a peer connects, video and HTTP traffic flow **directly** between the browser and your OctoPrint host over an encrypted WebRTC data channel (DTLS-SRTP). `bitba.ng` does not see this traffic.
+- **TURN fallback:** If a direct connection cannot be established (strict NAT/firewall), `bitba.ng` may relay the *encrypted* WebRTC stream via TURN. Even in that case, the relay sees ciphertext only — it cannot decrypt your video, OctoPrint UI, or credentials.
+- **No account, no tracking:** The plugin does not create an account, send telemetry, or upload usage data.
+- **Access control:** Anyone with your URL can reach your OctoPrint instance. Set a **PIN** in the plugin settings to require a passcode on the remote URL.
+
+See the [BitBang project page](https://github.com/richlegrand/bitbang) for the full signaling protocol and identity specifications.
+
 ## Supported hardware
 
 - **Raspberry Pi 4** -- hardware H.264 on Pi 4 via V4L2 M2M; tested with IMX477, IMX219
 - **Raspberry Pi 5** -- software H.264 via picamera2's `LibavH264Encoder`; 720p@30 comfortably
+- **Generic Linux PC/laptop/SBC with webcam** -- software H.264 via aiortc
 - **USB webcams** -- any device that offers a V4L2 capture format; aiortc software-encodes to H.264
 
 ## License
@@ -99,4 +114,4 @@ Built on [aiortc](https://github.com/aiortc/aiortc), [picamera2](https://github.
 
 ## Contributing
 
-This is a one-person project. Issues and PRs are welcome and genuinely appreciated. I'll do my best to respond promptly.
+Issues and PRs are welcome. 

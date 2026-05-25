@@ -31,7 +31,7 @@ In OctoPrint: **Settings → Plugin Manager → Get More**, search for **BitBang
 **Settings → Plugin Manager → Get More → "… from URL"**, then paste:
 
 ```
-https://github.com/richlegrand/OctoPrint-BitBang/archive/refs/tags/v0.1.1.zip
+https://github.com/richlegrand/OctoPrint-BitBang/archive/refs/tags/v0.1.2.zip
 ```
 
 Click **Install**, then restart OctoPrint when prompted.
@@ -41,7 +41,7 @@ Click **Install**, then restart OctoPrint when prompted.
 Inside your OctoPrint venv:
 
 ```bash
-pip install https://github.com/richlegrand/OctoPrint-BitBang/archive/refs/tags/v0.1.1.zip
+pip install OctoPrint-BitBang
 ```
 
 Restart OctoPrint.

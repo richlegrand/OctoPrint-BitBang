@@ -22,22 +22,26 @@ This is part of the [BitBang project](https://github.com/richlegrand/bitbang).
 
 ## Installation
 
-### Plugin Manager (recommended)
+### Plugin Manager (recommended, once accepted into the OctoPrint plugin registry)
 
-In OctoPrint: **Settings → Plugin Manager → Get More → "… from URL"**, then paste:
+In OctoPrint: **Settings → Plugin Manager → Get More**, search for **BitBang**, click **Install**.
+
+### Plugin Manager, install from URL
+
+**Settings → Plugin Manager → Get More → "… from URL"**, then paste:
 
 ```
-https://github.com/richlegrand/OctoPrint-BitBang/archive/main.zip
+https://github.com/richlegrand/OctoPrint-BitBang/archive/refs/tags/v0.1.1.zip
 ```
 
 Click **Install**, then restart OctoPrint when prompted.
 
 ### pip
 
-If you prefer the command line, inside your OctoPrint venv:
+Inside your OctoPrint venv:
 
 ```bash
-pip install OctoPrint-BitBang
+pip install https://github.com/richlegrand/OctoPrint-BitBang/archive/refs/tags/v0.1.1.zip
 ```
 
 Restart OctoPrint.

@@ -10,7 +10,8 @@ __plugin_description__ = "Remote OctoPrint access with live H.264 video via BitB
 __plugin_url__ = "https://github.com/richlegrand/OctoPrint-BitBang"
 __plugin_author__ = "Rich LeGrand"
 __plugin_license__ = "MIT"
-__plugin_pythoncompat__ = ">=3.7,<4"
+__plugin_privacypolicy__ = "https://github.com/richlegrand/OctoPrint-BitBang/blob/main/PRIVACY.md"
+__plugin_pythoncompat__ = ">=3.10,<4"
 
 try:
     import threading

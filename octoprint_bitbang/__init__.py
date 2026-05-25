@@ -120,6 +120,16 @@ try:
                 pin=pin,
             )
 
+            # Route the adapter's connection-request event into OctoPrint's
+            # structured logger so the connecting browser IP shows up in
+            # octoprint.log (and any plugin-log filter) rather than only
+            # appearing in stdout/journald.
+            @self._adapter.on_connection_request
+            def _log_connection_request(client_id, browser_ip):
+                self._logger.info(
+                    f"Connection request from {client_id} (browser_ip={browser_ip})"
+                )
+
             self._thread = threading.Thread(
                 target=self._adapter.run,
                 daemon=True,
@@ -127,7 +137,7 @@ try:
             )
             self._thread.start()
 
-            url = f"https://bitba.ng/{self._adapter.uid}"
+            url = self._adapter.url
             self._settings.set(["url"], url)
             self._settings.save()
             self._logger.info(f"BitBang remote access: {url}")

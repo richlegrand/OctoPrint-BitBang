@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Multimedia :: Video",
 ]
 dependencies = [
-    "bitbang>=0.1.46",
+    "bitbang>=0.1.53",
     "aiohttp>=3.8.0",
     "Pillow>=9.0.0",
     "numpy>=1.20.0",

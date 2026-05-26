@@ -48,19 +48,34 @@ Restart OctoPrint.
 
 ## Usage
 
-0. If you are using a separate program for camera streaming (e.g. camera-streamer, mjpg-streamer, ustreamer) you should stop these processes before running BitBang plugin to avoid camera access contention. 
-1. Point your browser to your local OctoPrint server. Open **Settings → BitBang**.
-2. Choose camera from dropdown.
+1. If you are using a separate program for camera streaming (e.g. camera-streamer, mjpg-streamer, ustreamer) you should stop these processes before running BitBang plugin to avoid camera access contention. See commands below.
+
+Stable octopi stack:
+```bash
+sudo systemctl stop webcamd
+sudo systemctl stop ffmpeg_hls
+sudo systemctl disable webcamd
+sudo systemctl disable ffmpeg_hls
+```
+
+New camera stack:
+```bash
+sudo systemctl stop camera-streamer
+sudo systemctl disable camera-streamer
+```
+
+2. Point your browser to your local OctoPrint server. Open **Settings → BitBang**.
+3. Choose camera from dropdown.
 
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/camera_select.png)
 
-3. Choose resolution.
+4. Choose resolution.
 
 ![Resolution dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/resolution_select.png)
 
-4. Set a PIN (Optional).
-5. Save and **restart OctoPrint**.
-6. Refresh the OctoPrint tab in your browser. A button labeled BitBang is available in the menu bar -- click it for the URL.
+5. Set a PIN (Optional).
+6. Save and **restart OctoPrint**.
+7. Refresh the OctoPrint tab in your browser. A button labeled BitBang is available in the menu bar -- click it for the URL.
 
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/bitbang_select.png)
 

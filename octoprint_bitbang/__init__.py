@@ -5,7 +5,7 @@ No account, no subscription, no port forwarding. One shareable link.
 """
 
 __plugin_name__ = "BitBang"
-__plugin_version__ = "0.1.2"
+__plugin_version__ = "0.1.3"
 __plugin_description__ = "Remote OctoPrint access with live H.264 video via BitBang WebRTC. No account, no port forwarding, one shareable link."
 __plugin_url__ = "https://github.com/richlegrand/OctoPrint-BitBang"
 __plugin_author__ = "Rich LeGrand"
@@ -152,7 +152,6 @@ try:
             return flask.jsonify(servers)
 
         @octoprint.plugin.BlueprintPlugin.route("/offer", methods=["POST"])
-        @octoprint.plugin.BlueprintPlugin.csrf_exempt()
         def local_offer(self):
             """Exchange WebRTC SDP for local H.264 video streaming."""
             if not self._adapter or not self._adapter.player or not self._adapter.player.video:
@@ -247,7 +246,6 @@ try:
             })
 
         @octoprint.plugin.BlueprintPlugin.route("/camera/brightness", methods=["POST"])
-        @octoprint.plugin.BlueprintPlugin.csrf_exempt()
         def set_brightness(self):
             """Update camera brightness live. Accepts {"value": int -100..100}."""
             try:

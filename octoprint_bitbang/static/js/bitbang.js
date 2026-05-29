@@ -10,11 +10,6 @@
 (function () {
     var isBitBang = !!window.__bbSessionId;
 
-    function getCsrfToken() {
-        var m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
-        return m ? decodeURIComponent(m[1]) : null;
-    }
-
     function addFullscreenButton(video) {
         var wrapper = document.createElement("div");
         wrapper.style.cssText = "position:relative;display:block;width:100%;pointer-events:auto";
@@ -73,10 +68,7 @@
             debounce = setTimeout(function () {
                 fetch("/plugin/bitbang/camera/brightness", {
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": getCsrfToken()
-                    },
+                    headers: OctoPrint.getRequestHeaders("POST", { "Content-Type": "application/json" }),
                     body: JSON.stringify({ value: parseInt(slider.value, 10) })
                 }).catch(function (err) {
                     console.log("[BitBang] Brightness update failed:", err);
@@ -194,10 +186,7 @@
             }).then(function () {
                 return fetch("/plugin/bitbang/offer", {
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRF-Token": getCsrfToken()
-                    },
+                    headers: OctoPrint.getRequestHeaders("POST", { "Content-Type": "application/json" }),
                     body: JSON.stringify({
                         sdp: pc.localDescription.sdp,
                         type: pc.localDescription.type

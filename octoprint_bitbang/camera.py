@@ -16,12 +16,21 @@ def detect_camera(logger=None):
     Or None if no camera found.
     """
     log = logger.info if logger else lambda msg: print(f"[camera] {msg}")
+    warn = logger.warning if logger else lambda msg: print(f"[camera] {msg}")
 
     # 1. picamera2 (Raspberry Pi CSI)
-    source = _try_picamera2()
-    if source:
+    try:
+        source = _try_picamera2()
         log("Found Pi CSI camera via picamera2")
         return source
+    except ImportError:
+        # Not on a Pi (or picamera2 not installed) — expected, fall through.
+        pass
+    except Exception as e:
+        # picamera2 imported but instantiation failed (camera busy, libcamera
+        # misconfig, etc.). Surface this so the user knows their CSI camera
+        # wasn't simply absent.
+        warn(f"picamera2 present but camera init failed: {e}")
 
     # 2. USB webcam (platform-specific)
     source = _try_usb_webcam()
@@ -34,14 +43,15 @@ def detect_camera(logger=None):
 
 
 def _try_picamera2():
-    """Check if picamera2 is available (Raspberry Pi CSI camera)."""
-    try:
-        from picamera2 import Picamera2
-        cam = Picamera2()
-        cam.close()
-        return {"type": "picamera2"}
-    except Exception:
-        return None
+    """Check if picamera2 is available (Raspberry Pi CSI camera).
+
+    Raises ImportError if picamera2 isn't installed; raises other exceptions
+    if it is but the camera can't be opened. Callers should log appropriately.
+    """
+    from picamera2 import Picamera2
+    cam = Picamera2()
+    cam.close()
+    return {"type": "picamera2"}
 
 
 def _try_usb_webcam():

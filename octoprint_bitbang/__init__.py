@@ -5,7 +5,7 @@ No account, no subscription, no port forwarding. One shareable link.
 """
 
 __plugin_name__ = "BitBang"
-__plugin_version__ = "0.1.4"
+__plugin_version__ = "0.1.5"
 __plugin_description__ = "Remote OctoPrint access with live H.264 video via BitBang WebRTC. No account, no port forwarding, one shareable link."
 __plugin_url__ = "https://github.com/richlegrand/OctoPrint-BitBang"
 __plugin_author__ = "Rich LeGrand"
@@ -59,8 +59,14 @@ try:
                 cam = Picamera2()
                 self._picam2_sensor_size = cam.sensor_resolution
                 cam.close()
-            except Exception:
+            except ImportError:
+                # Expected on non-Pi systems.
                 pass
+            except Exception as e:
+                # picamera2 is installed but instantiation failed (camera in
+                # use by another process, libcamera misconfig, etc.). The
+                # resolutions endpoint will fall back to v4l2 probing.
+                self._logger.info(f"picamera2 sensor probe failed: {e}")
 
         def _start_bitbang(self):
             port = self._settings.global_get(["server", "port"]) or 5000
@@ -119,6 +125,7 @@ try:
                 ws_target=f"localhost:{port}",
                 program_name="octoprint",
                 pin=pin,
+                logger=self._logger,
             )
 
             # Route the adapter's connection-request event into OctoPrint's
@@ -492,6 +499,13 @@ try:
         "octoprint.plugin.softwareupdate.check_config": _get_update_information,
     }
 
-except ImportError:
-    # OctoPrint not installed - standalone CLI mode
-    pass
+except ImportError as e:
+    # Standalone CLI mode (OctoPrint not installed) is the expected case
+    # for the missing `octoprint.plugin` import. Anything else here is a
+    # real load failure — surface it in octoprint.log so users (and
+    # reviewers) can see which dependency is missing instead of the
+    # plugin silently disappearing.
+    import logging
+    logging.getLogger(__name__).warning(
+        "BitBang plugin not loaded: %s", e
+    )

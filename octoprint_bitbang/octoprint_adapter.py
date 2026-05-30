@@ -5,10 +5,14 @@ reverse proxy. Fully async -- no WSGI thread pool.
 Camera source is auto-detected or explicitly configured.
 """
 
+import logging
+
 from bitbang import BitBangASGI
 from aiortc.contrib.media import MediaRelay
 
 from .camera import detect_camera
+
+_log = logging.getLogger(__name__)
 
 
 def force_h264(pc, sender):
@@ -30,18 +34,19 @@ class OctoPrintBitBang(BitBangASGI):
     Falls back to HTTP-only mode if no camera is found.
     """
 
-    def __init__(self, app, camera_source=None, ws_target=None, **kwargs):
+    def __init__(self, app, camera_source=None, ws_target=None, logger=None, **kwargs):
         super().__init__(app, **kwargs)
         self.ws_target = ws_target  # host:port for WebSocket bridging
         self.relay = MediaRelay()
         self.player = None
+        self._logger = logger or _log
         self._init_camera(camera_source)
 
     def _init_camera(self, camera_source):
         """Initialize camera from explicit source or auto-detect."""
-        source = camera_source or detect_camera()
+        source = camera_source or detect_camera(logger=self._logger)
         if not source:
-            print("No camera - running in HTTP-only mode")
+            self._logger.info("No camera - running in HTTP-only mode")
             return
 
         if source["type"] == "usb":
@@ -56,9 +61,9 @@ class OctoPrintBitBang(BitBangASGI):
                     flip_horizontal=source.get("flip_horizontal", False),
                     flip_vertical=source.get("flip_vertical", False),
                 )
-                print(f"Opened USB camera: {source['device']}")
+                self._logger.info(f"Opened USB camera: {source['device']}")
             except Exception as e:
-                print(f"Warning: Could not open camera '{source['device']}': {e}")
+                self._logger.warning(f"Could not open camera '{source['device']}': {e}")
 
         elif source["type"] == "picamera2":
             # Pi CSI camera - picamera2 H264Encoder (hw on Pi 4, sw on Pi 5)
@@ -75,16 +80,16 @@ class OctoPrintBitBang(BitBangASGI):
                     flip_horizontal=source.get("flip_horizontal", False),
                     flip_vertical=source.get("flip_vertical", False),
                 )
-                print(f"Opened Pi CSI camera via H264Encoder ({size[0]}x{size[1]}@{framerate})")
+                self._logger.info(f"Opened Pi CSI camera via H264Encoder ({size[0]}x{size[1]}@{framerate})")
             except Exception as e:
-                print(f"Warning: Could not open Pi CSI camera: {e}")
+                self._logger.warning(f"Could not open Pi CSI camera: {e}")
 
     def setup_peer_connection(self, pc, client_id):
         """Add camera video track to peer connection."""
         if self.player and self.player.video:
             sender = pc.addTrack(self.relay.subscribe(self.player.video))
             force_h264(pc, sender)
-            print(f"Added camera video track for {client_id}")
+            self._logger.info(f"Added camera video track for {client_id}")
 
     def get_stream_metadata(self):
         """Return stream name for video track."""

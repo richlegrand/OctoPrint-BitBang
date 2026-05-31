@@ -31,7 +31,7 @@ In OctoPrint: **Settings → Plugin Manager → Get More**, search for **BitBang
 **Settings → Plugin Manager → Get More → "… from URL"**, then paste:
 
 ```
-https://github.com/richlegrand/OctoPrint-BitBang/archive/refs/tags/v0.1.2.zip
+https://github.com/richlegrand/OctoPrint-BitBang/archive/main.zip
 ```
 
 Click **Install**, then restart OctoPrint when prompted.
@@ -122,6 +122,15 @@ See the [BitBang project page](https://github.com/richlegrand/bitbang) for the f
 - **Raspberry Pi 5** -- software H.264 via picamera2's `LibavH264Encoder`; 720p@30 comfortably
 - **Generic Linux PC/laptop/SBC with webcam** -- software H.264 via aiortc
 - **USB webcams** -- any device that offers a V4L2 capture format; aiortc software-encodes to H.264
+
+### Software requirements
+
+Live video uses [PyAV](https://github.com/PyAV-Org/PyAV) (Python bindings for FFmpeg) via [aiortc](https://github.com/aiortc/aiortc). Two pieces need to line up at runtime:
+
+- **FFmpeg 7.x runtime** (`libavformat.so.61` and friends). On Raspberry Pi OS Bookworm or newer: `sudo apt install ffmpeg`. Older releases ship FFmpeg 5/6 — install via backports or build from source.
+- **64-bit OS recommended.** PyAV ships prebuilt wheels with bundled FFmpeg for 64-bit Linux (`aarch64`) and macOS; 32-bit ARM (`armv7l`) has no wheel and pip must source-build, which is fragile if the system FFmpeg version doesn't match. OctoPi 1.1.0+ is 64-bit by default. 32-bit installs can work but typically need a manual FFmpeg 7 install first.
+
+If the video stack can't be initialized, the plugin still loads in diagnostic mode -- it appears in OctoPrint with a clear log line in `octoprint.log` (look for `BitBang video stack unavailable`) so you can see exactly what's missing. Video and BitBang remote URL access stay disabled until the underlying dependency is resolved.
 
 ## License
 

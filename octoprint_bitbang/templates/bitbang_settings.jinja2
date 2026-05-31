@@ -71,6 +71,17 @@
                 </label>
             </div>
         </div>
+
+        <h3>Advanced</h3>
+
+        <div class="control-group">
+            <label class="control-label">Signaling server</label>
+            <div class="controls">
+                <input type="text" class="input-xlarge"
+                       data-bind="value: settings.plugins.bitbang.signaling_server">
+                <span class="help-inline">Default <code>bitba.ng</code>. To use your own <a href="https://github.com/richlegrand/bitbang-server" target="_blank" rel="noopener">bitbang-server</a>, replace with the hostname (e.g. <code>signaling.example.com</code>).</span>
+            </div>
+        </div>
     </form>
 
     <div class="alert alert-info" style="margin-top: 16px;">

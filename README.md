@@ -20,18 +20,7 @@ This is part of the [BitBang project](https://github.com/richlegrand/bitbang).
 - **Mobile friendly:** BitBang URL works with phones/tablets.
 - **PIN protection:** Optional PIN required to access the remote URL.
 
-## Requirements
-
-Live video uses [PyAV](https://github.com/PyAV-Org/PyAV) (Python bindings for FFmpeg) via [aiortc](https://github.com/aiortc/aiortc). Two pieces need to line up at runtime:
-
-- **FFmpeg 7.x runtime** (`libavformat.so.61` and friends). On Raspberry Pi OS Bookworm or newer: `sudo apt install ffmpeg`. Older releases ship FFmpeg 5/6 — install via backports or build from source.
-- **64-bit OS recommended.** PyAV ships prebuilt wheels with bundled FFmpeg for 64-bit Linux (`aarch64`) and macOS; 32-bit ARM (`armv7l`) has no wheel and pip must source-build, which is fragile if the system FFmpeg version doesn't match. OctoPi 1.1.0+ is 64-bit by default. 32-bit installs can work but typically need a manual FFmpeg 7 install first.
-
-If the video stack can't be initialized, the plugin still loads in diagnostic mode -- it appears in OctoPrint with a clear log line in `octoprint.log` (look for `BitBang video stack unavailable`) so you can see exactly what's missing. Video and BitBang remote URL access stay disabled until the underlying dependency is resolved.
-
 ## Installation
-
-> Before installing, check the [Requirements](#requirements) above — especially FFmpeg 7.x.
 
 ### Plugin Manager (recommended, once accepted into the OctoPrint plugin registry)
 
@@ -56,6 +45,12 @@ pip install OctoPrint-BitBang
 ```
 
 Restart OctoPrint.
+
+### Did it work?
+
+After OctoPrint restarts, you should see a **BitBang** button in the navbar and a new **BitBang** entry in Settings. If both are there, you're done -- continue to [Usage](#usage).
+
+If the plugin doesn't show up, or `octoprint.log` contains `BitBang plugin not loaded` or `BitBang video stack unavailable`, the most common cause is an older OctoPi image (32-bit, or Python 3.9) where pip can't use a prebuilt dependency. See [Installation Notes](#installation-notes) for diagnosis and fixes.
 
 ## Usage
 
@@ -134,7 +129,49 @@ See the [BitBang project page](https://github.com/richlegrand/bitbang) for the f
 - **Generic Linux PC/laptop/SBC with webcam** -- software H.264 via aiortc
 - **USB webcams** -- any device that offers a V4L2 capture format; aiortc software-encodes to H.264
 
-See [Requirements](#requirements) for the FFmpeg / 64-bit OS notes that apply across all of the above.
+## Installation Notes
+
+If the basic [Installation](#installation) worked, skip this section.
+
+The plugin's main dependency is `av` ([PyAV](https://github.com/PyAV-Org/PyAV)), which ships prebuilt wheels with FFmpeg already bundled. When pip can use a wheel, the system's FFmpeg version doesn't matter -- the wheel uses its own.
+
+The wheel is available for:
+
+- **64-bit Linux** (`aarch64` or `x86_64`) -- no 32-bit ARM wheels exist
+- **Python 3.10 or newer** -- `av` wheels start at cp310
+- **glibc 2.28+** -- Debian 11/Bullseye and anything newer
+
+### Quick check
+
+```bash
+uname -m            # aarch64 = 64-bit Pi (good); armv7l = 32-bit (problem)
+python --version    # 3.10 or newer = good
+```
+
+### By OctoPi version
+
+| Version | What to do |
+|---|---|
+| **1.1.0+** | 64-bit Bookworm + Python 3.11 by default. Just install -- nothing system-level needed. |
+| **1.0.x** | 32-bit Bullseye + Python 3.9. Neither has a PyAV wheel. Upgrade to 1.1.0+ before installing. |
+| **Pre-1.0** | Even older base. Upgrade. |
+
+### 32-bit or old Python
+
+If `uname -m` says `armv7l`, or `python --version` is 3.9 or earlier, there's no PyAV wheel for your setup. Pip falls back to source-building PyAV, which needs FFmpeg 7 dev headers *and* matching runtime on the system -- fragile, and the source of most `libavformat.so.61: cannot open shared object file` errors. Easiest fix is to upgrade your OctoPi image to 1.1.0+ (64-bit, Python 3.11).
+
+If you really need to stay on 32-bit or older Python, install FFmpeg 7 dev headers and runtime first:
+
+```bash
+sudo apt install ffmpeg libavformat-dev libavcodec-dev libavfilter-dev \
+    libavdevice-dev libavutil-dev libswresample-dev libswscale-dev
+```
+
+Note: on Bullseye the apt FFmpeg is too old (5.x), so the above won't be enough -- you'd need backports or a custom FFmpeg 7 build before pip can produce a working PyAV. Realistically, OS upgrade is the simpler path.
+
+### Diagnostic mode
+
+If the video stack fails to import for any reason, the plugin still loads -- settings and navbar are visible, and `octoprint.log` shows a clear `BitBang video stack unavailable: <reason>` line. You can see the missing piece in OctoPrint instead of grepping logs.
 
 ## License
 

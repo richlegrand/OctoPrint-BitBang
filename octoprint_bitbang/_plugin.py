@@ -62,6 +62,21 @@ class BitBangPlugin(
         self._thread = None
         self._local_pcs = set()  # track local WebRTC peer connections
 
+    def on_shutdown(self):
+        # Release the camera cleanly when OctoPrint shuts down via its own
+        # graceful path (and on in-process teardown such as a camera-device
+        # change). NOTE: verified this does NOT fire on a systemd `service
+        # octoprint restart` (SIGTERM) -- OctoPrint runs no plugin finalizers
+        # there, so this does not cover the restart-while-streaming mmal wedge.
+        # See V4l2H264Track.stop (graceful SIGINT release).
+        try:
+            player = getattr(self._adapter, "player", None) if self._adapter else None
+            if player is not None:
+                player.stop()
+                self._logger.info("BitBang: stopped camera capture on shutdown")
+        except Exception as e:
+            self._logger.warning(f"BitBang: error stopping camera on shutdown: {e}")
+
     def on_after_startup(self):
         if _VIDEO_IMPORT_ERROR:
             # Soft-import failure already logged at module load. Re-log via
@@ -305,30 +320,87 @@ class BitBangPlugin(
 
     @octoprint.plugin.BlueprintPlugin.route("/cameras", methods=["GET"])
     def list_cameras(self):
-        """List available video capture devices."""
+        """List actual camera choices, not every V4L2 node.
+
+        A stock Pi exposes many /dev/video* nodes -- ISP, codec, and decoder
+        processing blocks -- that look like capture devices but aren't cameras.
+        We list only real cameras: USB/UVC webcams and the legacy mmal Pi
+        camera (see _camera_info). Modern-stack CSI cameras come via picamera2.
+        """
         import subprocess
         cameras = []
-        # Pi CSI camera surfaces through picamera2/libcamera, not v4l2-ctl
+        # Pi CSI camera (modern libcamera stack) surfaces through picamera2.
         if getattr(self, "_picam2_sensor_size", None):
-            cameras.append({"device": "picamera2", "name": "Pi CSI camera"})
+            cameras.append({"device": "picamera2", "name": "Pi Camera"})
         try:
             result = subprocess.run(
                 ["v4l2-ctl", "--list-devices"],
                 capture_output=True, text=True, timeout=5
             )
-            current_name = None
             for line in result.stdout.splitlines():
-                if not line.startswith("\t"):
-                    current_name = line.strip().rstrip(":")
-                elif "/dev/video" in line:
-                    dev = line.strip()
-                    # Only include devices that have video formats
-                    # (filters out metadata-only nodes like /dev/video1)
-                    if self._has_video_formats(dev):
-                        cameras.append({"device": dev, "name": current_name or dev})
+                if "/dev/video" not in line:
+                    continue
+                dev = line.strip()
+                name = self._camera_info(dev)
+                if name:
+                    cameras.append({"device": dev, "name": name})
         except Exception as e:
             self._logger.warning(f"Failed to list cameras: {e}")
+        # Disambiguate identical labels (e.g. two generic "USB Camera"s).
+        totals = {}
+        for c in cameras:
+            totals[c["name"]] = totals.get(c["name"], 0) + 1
+        nth = {}
+        for c in cameras:
+            if totals[c["name"]] > 1:
+                nth[c["name"]] = nth.get(c["name"], 0) + 1
+                c["name"] = f"{c['name']} {nth[c['name']]}"
         return flask.jsonify(cameras)
+
+    def _camera_info(self, device):
+        """If `device` is a real camera, return a friendly display name; else
+        None. Allowlists by hardware: USB/UVC webcams (bus_info 'usb-') and the
+        legacy mmal Pi camera ('bcm2835 mmal' driver), excluding ISP/codec/
+        decoder nodes. Still requires a real capture format, so metadata-only
+        nodes (e.g. a webcam's second node) are dropped too."""
+        import subprocess
+        try:
+            info = subprocess.run(
+                ["v4l2-ctl", "-d", device, "--info"],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+        except Exception:
+            return None
+        driver = bus = card = ""
+        for ln in info.splitlines():
+            s = ln.strip()
+            if s.startswith("Driver name"):
+                driver = s.split(":", 1)[1].strip().lower()
+            elif s.startswith("Bus info"):
+                bus = s.split(":", 1)[1].strip().lower()
+            elif s.startswith("Card type"):
+                card = s.split(":", 1)[1].strip()
+        is_usb = bus.startswith("usb-")
+        is_mmal = "mmal" in driver
+        if not ((is_usb or is_mmal) and self._has_video_formats(device)):
+            return None
+        if is_mmal:
+            return "Pi Camera"
+        return self._clean_usb_name(card)
+
+    @staticmethod
+    def _clean_usb_name(card):
+        """Friendly label for a USB webcam. V4L2 card strings are inconsistent
+        (often the generic "UVC Camera (046d:0990)" with a USB vid:pid). Strip
+        the vid:pid and fall back to a generic name when nothing descriptive
+        remains, so the dropdown never shows raw vid:pid / driver noise."""
+        import re
+        name = re.sub(r"\s*\([0-9a-fA-F]{4}:[0-9a-fA-F]{4}\)\s*$", "",
+                      card or "").strip()
+        if not name or name.lower() in (
+                "uvc camera", "usb camera", "uvc", "usb video class"):
+            return "USB Camera"
+        return name
 
     @octoprint.plugin.BlueprintPlugin.route("/resolutions", methods=["GET"])
     def list_resolutions(self):
@@ -343,13 +415,15 @@ class BitBangPlugin(
             if device == "picamera2":
                 return flask.jsonify([])
             device = "/dev/video0"
-        resolutions = []
+        import re
+        discrete = []
+        stepwise_max = None
+        seen = set()
         try:
             result = subprocess.run(
                 ["v4l2-ctl", "--list-formats-ext", "-d", device],
                 capture_output=True, text=True, timeout=5
             )
-            seen = set()
             for line in result.stdout.splitlines():
                 line = line.strip()
                 if line.startswith("Size: Discrete"):
@@ -358,23 +432,57 @@ class BitBangPlugin(
                         continue
                     seen.add(res)
                     try:
-                        if int(res.split("x")[0]) > 1280:
+                        if int(res.split("x")[0]) > self._MAX_VIDEO_WIDTH:
                             continue
                     except ValueError:
                         continue
-                    resolutions.append(res)
+                    discrete.append(res)
+                elif (line.startswith("Size: Stepwise")
+                      or line.startswith("Size: Continuous")):
+                    # e.g. "Size: Stepwise 32x32 - 4056x3040 with step 2/2" --
+                    # take the max corner (last WxH on the line).
+                    pairs = re.findall(r"(\d+)x(\d+)", line)
+                    if pairs:
+                        w, h = int(pairs[-1][0]), int(pairs[-1][1])
+                        if stepwise_max is None or w * h > stepwise_max[0] * stepwise_max[1]:
+                            stepwise_max = (w, h)
         except Exception as e:
             self._logger.warning(f"Failed to list resolutions: {e}")
-        # Sort by width
-        resolutions.sort(key=lambda r: int(r.split("x")[0]))
+
+        if discrete:
+            resolutions = discrete
+        elif stepwise_max:
+            # Continuous-range device (Pi mmal CSI camera): offer a curated set
+            # of standard 4:3 and 16:9 modes that fit within the sensor max.
+            max_w, max_h = stepwise_max
+            resolutions = [
+                f"{w}x{h}" for (w, h) in self._STANDARD_RESOLUTIONS
+                if w <= max_w and h <= max_h and w <= self._MAX_VIDEO_WIDTH
+            ]
+        else:
+            resolutions = []
+        resolutions.sort(
+            key=lambda r: (int(r.split("x")[0]), int(r.split("x")[1])))
         return flask.jsonify(resolutions)
 
-    # Standard resolutions offered for Pi CSI cameras, filtered by sensor
-    # max. Mix of 4:3 and 16:9 so users can pick their preferred ratio.
-    _PICAMERA2_STANDARD_RESOLUTIONS = [
-        (640, 480), (800, 600),
-        (1280, 720), (1280, 960),
+    # Hard cap on offered video width, applied on every resolution path
+    # (discrete USB, stepwise mmal, picamera2). 720p (1280-wide) is the
+    # low-latency sweet spot; beyond it the USB re-encode path's MJPEG decode
+    # and bandwidth scale poorly. We also OBSERVED the legacy mmal CSI driver
+    # wedge the kernel at 1920x1080 -- a vb2_fop_release deadlock on teardown
+    # that leaves the camera unusable until a reboot; capping width keeps the
+    # mmal path at the more stable 720p operating point. Bump this one constant
+    # to allow larger (and prefer picamera2/libcamera for high-res CSI).
+    _MAX_VIDEO_WIDTH = 1280
+
+    # Standard resolutions offered when a device reports a continuous size
+    # range (Pi mmal CSI camera) or for picamera2 -- a mix of 4:3 and 16:9,
+    # filtered by the sensor max and _MAX_VIDEO_WIDTH.
+    _STANDARD_RESOLUTIONS = [
+        (640, 480), (800, 600), (1024, 768), (1280, 960),   # 4:3
+        (1280, 720), (1920, 1080),                          # 16:9
     ]
+    _PICAMERA2_STANDARD_RESOLUTIONS = _STANDARD_RESOLUTIONS
 
     def _picamera2_resolutions(self):
         """Return list of supported resolutions for the Pi CSI sensor, or None."""
@@ -385,20 +493,29 @@ class BitBangPlugin(
         return [
             f"{w}x{h}"
             for (w, h) in self._PICAMERA2_STANDARD_RESOLUTIONS
-            if w <= max_w and h <= max_h
+            if w <= max_w and h <= max_h and w <= self._MAX_VIDEO_WIDTH
         ]
 
     def _has_video_formats(self, device):
-        """Check if a V4L2 device has any video capture formats."""
+        """True if the device is a single-planar video-capture camera with at
+        least one advertised frame size. Accepts both discrete sizes (USB UVC)
+        and stepwise/continuous ranges (Pi mmal CSI camera). Excludes M2M
+        codec/ISP nodes, which report 'Type: Video Capture Multiplanar'."""
         import subprocess
         try:
             result = subprocess.run(
                 ["v4l2-ctl", "--list-formats-ext", "-d", device],
                 capture_output=True, text=True, timeout=5
             )
-            return "Size: Discrete" in result.stdout
         except Exception:
             return False
+        out = result.stdout
+        has_capture = any(
+            ln.strip() == "Type: Video Capture" for ln in out.splitlines())
+        has_sizes = any(
+            s in out for s in
+            ("Size: Discrete", "Size: Stepwise", "Size: Continuous"))
+        return has_capture and has_sizes
 
     # -- WebcamProviderPlugin API --
 
@@ -468,9 +585,6 @@ class BitBangPlugin(
         buf = _io.BytesIO()
         new_frame.to_image().save(buf, format="JPEG", quality=85)
         return buf.getvalue()
-
-    def on_shutdown(self):
-        pass  # Daemon thread exits with OctoPrint
 
     def get_settings_defaults(self):
         return {

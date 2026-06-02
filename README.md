@@ -50,7 +50,7 @@ Restart OctoPrint.
 
 After OctoPrint restarts, you should see a **BitBang** button in the navbar and a new **BitBang** entry in Settings. If both are there, you're done -- continue to [Usage](#usage).
 
-If the plugin doesn't show up, or `octoprint.log` contains `BitBang plugin not loaded` or `BitBang video stack unavailable`, the most common cause is an older OctoPi image (32-bit, or Python 3.9) where pip can't use a prebuilt dependency. See [Installation Notes](#installation-notes) for diagnosis and fixes.
+If the plugin doesn't show up, or `octoprint.log` contains `BitBang plugin not loaded` or `BitBang video stack unavailable`, see [Installation Notes](#installation-notes) -- usually a pre-3.10 Python image, or (on 32-bit) an `aiortc`/`libvpx` mismatch that needs one extra step.
 
 ## Usage
 
@@ -124,50 +124,51 @@ See the [BitBang project page](https://github.com/richlegrand/bitbang) for the f
 
 ## Supported hardware
 
-- **Raspberry Pi 4** -- hardware H.264 on Pi 4 via V4L2 M2M; tested with IMX477, IMX219
-- **Raspberry Pi 5** -- software H.264 via picamera2's `LibavH264Encoder`; 720p@30 comfortably
+- **Raspberry Pi 4 (32- or 64-bit OS)** -- hardware H.264 via the V4L2 M2M encoder (`h264_v4l2m2m`); tested with IMX477, IMX219
+- **Raspberry Pi 5** -- no hardware H.264 encoder; software H.264 (picamera2's `LibavH264Encoder` for CSI, aiortc for V4L2), which the A76 CPU handles at 720p@30
+- **CSI cameras** -- via picamera2/libcamera where available, or the legacy mmal device (`/dev/video2`) as a direct H.264 passthrough
+- **USB webcams** -- cams with onboard H.264 stream as a zero-encode passthrough; otherwise hardware-re-encoded on Pi 4 (`h264_v4l2m2m`) or software-encoded elsewhere
 - **Generic Linux PC/laptop/SBC with webcam** -- software H.264 via aiortc
-- **USB webcams** -- any device that offers a V4L2 capture format; aiortc software-encodes to H.264
+
+> **`ffmpeg` is required for the hardware H.264 paths.** The Pi CSI (legacy/mmal) passthrough and the USB hardware re-encode (`h264_v4l2m2m`) drive the system `ffmpeg` binary, which is present by default on OctoPi (the timelapse renderer depends on it). If `ffmpeg` is missing, BitBang automatically falls back to software encoding.
 
 ## Installation Notes
 
 If the basic [Installation](#installation) worked, skip this section.
 
-The plugin's main dependency is `av` ([PyAV](https://github.com/PyAV-Org/PyAV)), which ships prebuilt wheels with FFmpeg already bundled. When pip can use a wheel, the system's FFmpeg version doesn't matter -- the wheel uses its own.
+The video stack depends on `av` ([PyAV](https://github.com/PyAV-Org/PyAV)) and `aiortc`, installed as prebuilt wheels. As of v0.1.7 the plugin pins them (`aiortc<1.11`, and `av<12` on 32-bit ARM) so pip resolves to versions that work on current OctoPi -- **including the 32-bit stable image**:
 
-The wheel is available for:
-
-- **64-bit Linux** (`aarch64` or `x86_64`) -- no 32-bit ARM wheels exist
-- **Python 3.10 or newer** -- `av` wheels start at cp310
-- **glibc 2.28+** -- Debian 11/Bullseye and anything newer
+- **64-bit Linux** (`aarch64`/`x86_64`) -- PyPI ships `av` wheels with FFmpeg bundled; nothing system-level needed.
+- **32-bit Raspberry Pi OS** (`armv7l`) -- [piwheels](https://www.piwheels.org/) ships an `av` wheel built against the **system FFmpeg 5.1**, and the `av<12` pin selects it. Supported, with one possible extra step (see below).
+- **Python 3.10+** is required either way (`av` wheels start at cp310).
 
 ### Quick check
 
 ```bash
-uname -m            # aarch64 = 64-bit Pi (good); armv7l = 32-bit (problem)
-python --version    # 3.10 or newer = good
+uname -m            # aarch64 = 64-bit Pi; armv7l = 32-bit (also supported)
+python --version    # must be 3.10 or newer
 ```
 
 ### By OctoPi version
 
-| Version | What to do |
+| Version | Notes |
 |---|---|
-| **1.1.0+** | 64-bit Bookworm + Python 3.11 by default. Just install -- nothing system-level needed. |
-| **1.0.x** | 32-bit Bullseye + Python 3.9. Neither has a PyAV wheel. Upgrade to 1.1.0+ before installing. |
-| **Pre-1.0** | Even older base. Upgrade. |
+| **1.1.0** | Bookworm + Python 3.11. The **stable image is 32-bit** (`armv7l`) on every Pi model; 64-bit is nightly-only. v0.1.7 supports both. |
+| **1.0.x** | Bullseye + Python 3.9 -- below the 3.10 minimum. Upgrade to 1.1.0. |
+| **Pre-1.0** | Older base. Upgrade. |
 
-### 32-bit or old Python
+### 32-bit: aiortc / libvpx mismatch
 
-If `uname -m` says `armv7l`, or `python --version` is 3.9 or earlier, there's no PyAV wheel for your setup. Pip falls back to source-building PyAV, which needs FFmpeg 7 dev headers *and* matching runtime on the system -- fragile, and the source of most `libavformat.so.61: cannot open shared object file` errors. Easiest fix is to upgrade your OctoPi image to 1.1.0+ (64-bit, Python 3.11).
-
-If you really need to stay on 32-bit or older Python, install FFmpeg 7 dev headers and runtime first:
+On some 32-bit images the piwheels `aiortc` wheel is built against a newer `libvpx` than the OS ships, so `octoprint.log` shows `BitBang video stack unavailable: libvpx.so.9: cannot open shared object file`. Install the codec dev headers and rebuild aiortc against the system libvpx (in your OctoPrint venv):
 
 ```bash
-sudo apt install ffmpeg libavformat-dev libavcodec-dev libavfilter-dev \
-    libavdevice-dev libavutil-dev libswresample-dev libswscale-dev
+sudo apt install -y libvpx-dev libopus-dev
+pip install --no-binary aiortc --force-reinstall --no-deps "aiortc<1.11"
 ```
 
-Note: on Bullseye the apt FFmpeg is too old (5.x), so the above won't be enough -- you'd need backports or a custom FFmpeg 7 build before pip can produce a working PyAV. Realistically, OS upgrade is the simpler path.
+### Old Python (3.9 or earlier)
+
+`av` wheels start at Python 3.10, so OctoPi 1.0.x (Python 3.9) has no usable wheel -- upgrade the image to 1.1.0.
 
 ### Diagnostic mode
 

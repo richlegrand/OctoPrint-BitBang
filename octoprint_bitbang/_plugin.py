@@ -556,34 +556,51 @@ class BitBangPlugin(
             raise WebcamNotAbleToTakeSnapshotException(webcamName)
 
     async def _capture_frame(self):
-        """Grab one frame from the video relay and encode as JPEG."""
+        """Grab one frame from the video relay and encode as JPEG.
+
+        The hardware tracks (V4l2H264Track, PiH264Track) emit encoded av.Packet,
+        so we decode on demand with a software H.264 decoder until a keyframe
+        yields a frame -- decoding happens only for a snapshot, never during
+        normal streaming. The software path (UsbCameraSource) already emits raw
+        VideoFrames, which are used directly.
+        """
         import io as _io
         import av as _av
 
-        # Subscribe to the relay to get a frame without
-        # stealing from existing WebRTC consumers
+        # Subscribe to the relay so we don't steal from existing WebRTC consumers.
         track = self._adapter.relay.subscribe(self._adapter.player.video)
+        decoder = None
+        frame = None
         try:
-            frame = await track.recv()
+            for _ in range(150):  # a keyframe arrives within one GOP (~1s @30fps)
+                obj = await track.recv()
+                if isinstance(obj, _av.VideoFrame):    # software path: raw frame
+                    frame = obj
+                    break
+                if decoder is None:                    # encoded path: decode H.264
+                    decoder = _av.CodecContext.create("h264", "r")
+                decoded = decoder.decode(obj)
+                if decoded:
+                    frame = decoded[-1]
+                    break
+            if frame is None:
+                raise RuntimeError("no frame available for snapshot")
         finally:
             track.stop()
 
-        # CRITICAL: copy the raw plane data immediately. The relay
-        # shares frame buffers with the encoder -- any sws_scale call
-        # (to_ndarray, to_image, reformat) will segfault if the encoder
-        # is concurrently accessing the same buffer.
-        planes_data = [bytes(frame.planes[i]) for i in range(len(frame.planes))]
-        width, height = frame.width, frame.height
-        fmt = frame.format.name
+        if decoder is None:
+            # A raw relay frame may share its buffer with the encoder -- copy the
+            # planes before any sws_scale (to_image), which would otherwise
+            # segfault if the encoder touches the same buffer concurrently.
+            planes = [bytes(frame.planes[i]) for i in range(len(frame.planes))]
+            safe = _av.VideoFrame(frame.width, frame.height, frame.format.name)
+            for i, data in enumerate(planes):
+                safe.planes[i].update(data)
+            frame = safe
+        # A decoded frame is ours alone -- safe to convert directly.
 
-        # Build a new independent frame from the copied data
-        new_frame = _av.VideoFrame(width, height, fmt)
-        for i, data in enumerate(planes_data):
-            new_frame.planes[i].update(data)
-
-        # Now safe to convert -- this frame's buffer is ours alone
         buf = _io.BytesIO()
-        new_frame.to_image().save(buf, format="JPEG", quality=85)
+        frame.to_image().save(buf, format="JPEG", quality=85)
         return buf.getvalue()
 
     def get_settings_defaults(self):

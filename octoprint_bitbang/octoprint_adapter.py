@@ -179,8 +179,10 @@ class OctoPrintBitBang(BitBangASGI):
             return RTCConfiguration(servers) if servers else None
 
         async def on_open(client, ice_servers):
-            if client in pcs or not (self.player and self.player.video):
+            if client in pcs or not self.player:
                 return
+            self._logger.info(
+                f"[video-bridge] {client} open (ice_servers={len(ice_servers or [])})")
             config = rtc_config(ice_servers)
             pc = RTCPeerConnection(configuration=config) if config else RTCPeerConnection()
             pcs[client] = pc
@@ -194,7 +196,18 @@ class OctoPrintBitBang(BitBangASGI):
 
             sender = pc.addTrack(self.relay.subscribe(self.player.video))
             force_h264(pc, sender)
-            await pc.setLocalDescription(await pc.createOffer())
+            # setLocalDescription blocks until ICE gathering completes; a
+            # forwarded TURN server that's unreachable or whose hourly creds
+            # have rotated can hang it indefinitely. Bound it so a bad gather
+            # tears down this one PC instead of leaking it (the per-client task
+            # model below already keeps it from starving other sessions).
+            try:
+                await asyncio.wait_for(
+                    pc.setLocalDescription(await pc.createOffer()), 20)
+            except Exception:
+                await pc.close()
+                pcs.pop(client, None)
+                raise
             await send({"kind": "offer", "client": client, "sdp": pc.localDescription.sdp})
 
         async def on_answer(client, sdp):
@@ -222,6 +235,37 @@ class OctoPrintBitBang(BitBangASGI):
             if pc:
                 await pc.close()
 
+        locks = {}
+        tasks = set()
+
+        async def dispatch(kind, client, msg):
+            # Serialize per client so a session's offer precedes its
+            # answer/candidates, but run clients concurrently: the read loop
+            # must never block on one session's handshake (a hung ICE gather
+            # used to freeze the loop and starve every later session of video).
+            lock = locks.setdefault(client, asyncio.Lock())
+            try:
+                async with lock:
+                    if kind == "open":
+                        await on_open(client, msg.get("ice_servers"))
+                    elif kind == "answer":
+                        await on_answer(client, msg.get("sdp"))
+                    elif kind == "candidate":
+                        await on_candidate(client, msg.get("candidate"))
+                    elif kind == "close":
+                        await on_close(client)
+            except Exception as e:
+                self._logger.warning(f"[video-bridge] {kind} for {client} failed: {e}")
+                await on_close(client)
+            finally:
+                if kind == "close":
+                    locks.pop(client, None)
+
+        def schedule(kind, client, msg):
+            t = asyncio.ensure_future(dispatch(kind, client, msg))
+            tasks.add(t)
+            t.add_done_callback(tasks.discard)
+
         self._logger.info("[video-bridge] running")
         buf = b""
         try:
@@ -235,17 +279,16 @@ class OctoPrintBitBang(BitBangASGI):
                     line = line.strip()
                     if not line:
                         continue
-                    msg = json.loads(line)
+                    try:
+                        msg = json.loads(line)
+                    except ValueError:
+                        continue
                     kind, client = msg.get("kind"), msg.get("client")
-                    if kind == "open":
-                        await on_open(client, msg.get("ice_servers"))
-                    elif kind == "answer":
-                        await on_answer(client, msg.get("sdp"))
-                    elif kind == "candidate":
-                        await on_candidate(client, msg.get("candidate"))
-                    elif kind == "close":
-                        await on_close(client)
+                    if kind and client:
+                        schedule(kind, client, msg)
         finally:
+            for t in list(tasks):
+                t.cancel()
             for pc in list(pcs.values()):
                 await pc.close()
             self._logger.info("[video-bridge] stopped")

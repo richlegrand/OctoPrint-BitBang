@@ -39,7 +39,7 @@
             <label class="control-label">Camera</label>
             <div class="controls">
                 <select id="bitbang_camera_select" class="input-xlarge"
-                        data-bind="value: settings.plugins.bitbang.camera_device">
+                        data-bind="value: settings.plugins.bitbang.camera_device, valueAllowUnset: true">
                     <option value="">Auto-detect</option>
                 </select>
                 <button class="btn btn-mini" id="bitbang_refresh_cameras" type="button">
@@ -52,7 +52,7 @@
             <label class="control-label">Resolution</label>
             <div class="controls">
                 <select id="bitbang_resolution_select" class="input-medium"
-                        data-bind="value: settings.plugins.bitbang.camera_resolution">
+                        data-bind="value: settings.plugins.bitbang.camera_resolution, valueAllowUnset: true">
                     <option value="640x480">640x480</option>
                 </select>
             </div>
@@ -97,35 +97,24 @@
     var refreshBtn = document.getElementById("bitbang_refresh_cameras");
     if (!cameraSelect || !resolutionSelect) return;
 
-    function loadCameras() {
-        fetch("/plugin/bitbang/cameras")
-            .then(function (r) { return r.json(); })
-            .then(function (cameras) {
-                // Preserve current selection
-                var current = cameraSelect.value;
-                // Remove all except the auto-detect option
-                while (cameraSelect.options.length > 1) {
-                    cameraSelect.remove(1);
-                }
-                cameras.forEach(function (cam) {
-                    var opt = document.createElement("option");
-                    opt.value = cam.device;
-                    opt.textContent = cam.name + " (" + cam.device + ")";
-                    cameraSelect.appendChild(opt);
-                });
-                // Restore selection
-                if (current) cameraSelect.value = current;
-                // Load resolutions for current selection
-                loadResolutions(cameraSelect.value || cameras[0]?.device);
-            })
-            .catch(function () {});
+    // Set a <select> and notify Knockout's value binding — it doesn't see
+    // options added via raw DOM, so without the dispatched 'change' the
+    // observable (and thus the saved setting) won't follow the selection.
+    // Suppress the camera change handler during programmatic sets so we don't
+    // reload resolutions twice.
+    function setSelect(sel, value) {
+        var ok = value && Array.prototype.some.call(
+            sel.options, function (o) { return o.value === value; });
+        sel._suppress = true;
+        if (ok) sel.value = value;
+        sel.dispatchEvent(new Event("change"));
+        sel._suppress = false;
     }
 
-    function loadResolutions(device) {
-        fetch("/plugin/bitbang/resolutions?device=" + encodeURIComponent(device || ""))
+    function loadResolutions(device, wanted) {
+        return fetch("/plugin/bitbang/resolutions?device=" + encodeURIComponent(device || ""))
             .then(function (r) { return r.json(); })
             .then(function (resolutions) {
-                var current = resolutionSelect.value;
                 resolutionSelect.innerHTML = "";
                 resolutions.forEach(function (res) {
                     var opt = document.createElement("option");
@@ -133,23 +122,48 @@
                     opt.textContent = res;
                     resolutionSelect.appendChild(opt);
                 });
-                // Restore selection if still valid
-                if (resolutions.indexOf(current) >= 0) {
-                    resolutionSelect.value = current;
-                }
+                setSelect(resolutionSelect,
+                          resolutions.indexOf(wanted) >= 0 ? wanted : resolutions[0]);
+            })
+            .catch(function () {});
+    }
+
+    function loadCameras(wantedCamera, wantedRes) {
+        return fetch("/plugin/bitbang/cameras")
+            .then(function (r) { return r.json(); })
+            .then(function (cameras) {
+                while (cameraSelect.options.length > 1) cameraSelect.remove(1);
+                cameras.forEach(function (cam) {
+                    var opt = document.createElement("option");
+                    opt.value = cam.device;
+                    opt.textContent = cam.name + " (" + cam.device + ")";
+                    cameraSelect.appendChild(opt);
+                });
+                setSelect(cameraSelect, wantedCamera);
+                return loadResolutions(cameraSelect.value, wantedRes);
             })
             .catch(function () {});
     }
 
     cameraSelect.addEventListener("change", function () {
-        loadResolutions(cameraSelect.value);
+        if (cameraSelect._suppress) return;   // programmatic set — skip reload
+        loadResolutions(cameraSelect.value, resolutionSelect.value);
     });
 
     if (refreshBtn) {
-        refreshBtn.addEventListener("click", loadCameras);
+        refreshBtn.addEventListener("click", function () {
+            loadCameras(cameraSelect.value, resolutionSelect.value);
+        });
     }
 
-    // Load on settings panel open
-    loadCameras();
+    // Populate from the SAVED config — not the (Knockout-clobbered) DOM value —
+    // so the dropdowns reflect what's persisted and a Save round-trips cleanly.
+    fetch("/api/settings")
+        .then(function (r) { return r.json(); })
+        .then(function (s) {
+            var bb = (s.plugins && s.plugins.bitbang) || {};
+            loadCameras(bb.camera_device || "", bb.camera_resolution || "");
+        })
+        .catch(function () { loadCameras("", ""); });
 })();
 </script>

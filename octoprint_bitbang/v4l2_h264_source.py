@@ -238,7 +238,15 @@ class V4l2H264Track(MediaStreamTrack):
             cmd += ["-vf", ",".join(vf),
                     "-c:v", "h264_v4l2m2m",            # Pi 4 GPU encoder
                     "-b:v", str(self._bitrate), "-g", str(self._gop)]
-        cmd += ["-bsf:v", _VUI_BSF, "-flush_packets", "1", "-f", "h264", "pipe:1"]
+        bsf = _VUI_BSF
+        if not self._source_is_h264:
+            # h264_v4l2m2m emits SPS/PPS only once at stream start (libav then
+            # captures them as extradata and strips them from later packets),
+            # so a decoder that joins mid-stream — e.g. a browser opening the
+            # WebRTC video track — never sees parameter sets and renders black.
+            # dump_extra re-inserts SPS/PPS before every keyframe.
+            bsf += ",dump_extra=freq=keyframe"
+        cmd += ["-bsf:v", bsf, "-flush_packets", "1", "-f", "h264", "pipe:1"]
         return cmd
 
     def _capture_loop(self):

@@ -41,6 +41,59 @@
         video.parentNode.insertBefore(wrapper, video);
         wrapper.appendChild(video);
         wrapper.appendChild(btn);
+
+        // Hide the fullscreen button until live video appears (keep the
+        // "Connecting…" overlay clean).
+        btn.style.display = "none";
+        var reveal = function () { btn.style.display = ""; };
+        if (!video.paused && video.readyState >= 2) reveal();
+        else video.addEventListener("playing", reveal);
+    }
+
+    // Show a status overlay while the WebRTC video establishes (connection +
+    // camera take a few seconds), driven by the <video> element's own media
+    // events so it always reflects reality.
+    function addStatusOverlay(video) {
+        var wrap = video.parentNode;
+        if (!wrap) return;
+
+        if (!document.getElementById("bb-spin-style")) {
+            var st = document.createElement("style");
+            st.id = "bb-spin-style";
+            st.textContent = "@keyframes bb-spin{to{transform:rotate(360deg)}}";
+            document.head.appendChild(st);
+        }
+
+        var overlay = document.createElement("div");
+        overlay.style.cssText =
+            "position:absolute;inset:0;display:flex;flex-direction:column;" +
+            "align-items:center;justify-content:center;gap:12px;color:#bbb;" +
+            "background:#000;font-size:14px;pointer-events:none;z-index:5;";
+        var spinner = document.createElement("div");
+        spinner.style.cssText =
+            "width:30px;height:30px;border:3px solid #444;border-top-color:#bbb;" +
+            "border-radius:50%;animation:bb-spin 0.8s linear infinite;";
+        var label = document.createElement("div");
+        label.textContent = "Connecting to camera…";
+        overlay.appendChild(spinner);
+        overlay.appendChild(label);
+        wrap.appendChild(overlay);
+
+        var live = false;
+        function show(msg, spin) {
+            overlay.style.display = "flex";
+            label.textContent = msg;
+            spinner.style.display = spin ? "block" : "none";
+        }
+        function hide() { live = true; overlay.style.display = "none"; }
+
+        video.addEventListener("playing", hide);
+        video.addEventListener("loadeddata", hide);
+        video.addEventListener("waiting", function () { if (live) show("Buffering…", true); });
+        video.addEventListener("stalled", function () { if (live) show("Reconnecting…", true); });
+
+        // If video never starts, stop spinning and tell the user.
+        setTimeout(function () { if (!live) show("Camera unavailable", false); }, 25000);
     }
 
     function addBrightnessControl(wrapper, initialValue) {
@@ -79,6 +132,16 @@
         container.appendChild(icon);
         container.appendChild(slider);
         wrapper.appendChild(container);
+
+        // Hide the brightness control until live video appears (don't show it
+        // floating over the "Connecting…" overlay).
+        var v = wrapper.querySelector("video");
+        if (v) {
+            container.style.display = "none";
+            var reveal = function () { container.style.display = "flex"; };
+            if (!v.paused && v.readyState >= 2) reveal();
+            else v.addEventListener("playing", reveal);
+        }
     }
 
     function applyCameraConfig(video) {
@@ -94,10 +157,35 @@
         }).catch(function () {});
     }
 
+    // Keep the video filling its box at the real stream aspect. A WebRTC
+    // <video> has no dimensions until the first frame, so if it binds early the
+    // browser can cache a placeholder/half-size layout and not reflow (→ a small
+    // video with black around it, needing a fresh tab). Re-assert sizing and
+    // force a reflow whenever real dimensions arrive so it self-corrects.
+    function applyVideoSizing(video) {
+        function set() {
+            video.style.width = "100%";
+            video.style.height = "auto";
+            video.style.maxWidth = "100%";
+            video.style.objectFit = "contain";
+            video.style.display = "block";
+        }
+        set();
+        function reflow() {
+            set();
+            // Collapse then restore height within one frame: forces the browser
+            // to recompute from the new intrinsic aspect, no visible flicker.
+            video.style.height = "0px";
+            void video.offsetHeight;
+            video.style.height = "auto";
+        }
+        video.addEventListener("loadedmetadata", reflow);
+        video.addEventListener("resize", reflow);
+    }
+
     function replaceWebcam(video) {
-        video.style.width = "100%";
         video.style.backgroundColor = "#000";
-        video.style.display = "block";
+        applyVideoSizing(video);
 
         // OctoPrint 1.11+ Classic Webcam hides its default containers until
         // a stream URL is configured. Mount into the outer container so
@@ -119,6 +207,7 @@
             }
             classicContainer.appendChild(video);
             addFullscreenButton(video);
+            addStatusOverlay(video);
             applyCameraConfig(video);
             return true;
         }
@@ -128,6 +217,7 @@
         if (!img) return false;
         img.parentNode.replaceChild(video, img);
         addFullscreenButton(video);
+        addStatusOverlay(video);
         applyCameraConfig(video);
         return true;
     }

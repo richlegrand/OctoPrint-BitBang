@@ -143,6 +143,113 @@ class OctoPrintBitBang(BitBangASGI):
             return {"0": "camera"}
         return {}
 
+    async def run_video_bridge(self, sock):
+        """Negotiate a per-browser video PeerConnection over a socketpair to the
+        Go proxy, which relays our offer/answer/ICE to the browser over its data
+        channel. Reuses the existing camera track (self.relay + self.player) and
+        force_h264 — only the *signaling path* moves off our own aiortc bitbang
+        connection and onto the Go device. Newline-JSON protocol, keyed by
+        client: open / offer / answer / candidate / close.
+        """
+        import asyncio
+        import json
+        from aiortc import (RTCPeerConnection, RTCSessionDescription,
+                            RTCConfiguration, RTCIceServer)
+        from aiortc.sdp import candidate_from_sdp
+
+        loop = asyncio.get_running_loop()
+        sock.setblocking(False)
+        pcs = {}
+
+        async def send(obj):
+            await loop.sock_sendall(sock, (json.dumps(obj) + "\n").encode())
+
+        def rtc_config(ice_servers):
+            # The Go data PC's STUN/TURN, forwarded so the video PC can reach
+            # peers with no direct path. None → aiortc's default (host only).
+            if not ice_servers:
+                return None
+            servers = []
+            for s in ice_servers:
+                if not s.get("urls"):
+                    continue
+                servers.append(RTCIceServer(
+                    urls=s["urls"], username=s.get("username"),
+                    credential=s.get("credential")))
+            return RTCConfiguration(servers) if servers else None
+
+        async def on_open(client, ice_servers):
+            if client in pcs or not (self.player and self.player.video):
+                return
+            config = rtc_config(ice_servers)
+            pc = RTCPeerConnection(configuration=config) if config else RTCPeerConnection()
+            pcs[client] = pc
+
+            @pc.on("connectionstatechange")
+            async def _():
+                self._logger.info(f"[video-bridge] {client} -> {pc.connectionState}")
+                if pc.connectionState in ("failed", "closed"):
+                    await pc.close()
+                    pcs.pop(client, None)
+
+            sender = pc.addTrack(self.relay.subscribe(self.player.video))
+            force_h264(pc, sender)
+            await pc.setLocalDescription(await pc.createOffer())
+            await send({"kind": "offer", "client": client, "sdp": pc.localDescription.sdp})
+
+        async def on_answer(client, sdp):
+            pc = pcs.get(client)
+            if pc:
+                await pc.setRemoteDescription(RTCSessionDescription(sdp, "answer"))
+
+        async def on_candidate(client, cand):
+            pc = pcs.get(client)
+            if not (pc and cand and cand.get("candidate")):
+                return
+            try:
+                s = cand["candidate"]
+                if s.startswith("candidate:"):
+                    s = s[len("candidate:"):]
+                c = candidate_from_sdp(s)
+                c.sdpMid = cand.get("sdpMid")
+                c.sdpMLineIndex = cand.get("sdpMLineIndex")
+                await pc.addIceCandidate(c)
+            except Exception as e:
+                self._logger.warning(f"[video-bridge] addIceCandidate failed: {e}")
+
+        async def on_close(client):
+            pc = pcs.pop(client, None)
+            if pc:
+                await pc.close()
+
+        self._logger.info("[video-bridge] running")
+        buf = b""
+        try:
+            while True:
+                chunk = await loop.sock_recv(sock, 65536)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    msg = json.loads(line)
+                    kind, client = msg.get("kind"), msg.get("client")
+                    if kind == "open":
+                        await on_open(client, msg.get("ice_servers"))
+                    elif kind == "answer":
+                        await on_answer(client, msg.get("sdp"))
+                    elif kind == "candidate":
+                        await on_candidate(client, msg.get("candidate"))
+                    elif kind == "close":
+                        await on_close(client)
+        finally:
+            for pc in list(pcs.values()):
+                await pc.close()
+            self._logger.info("[video-bridge] stopped")
+
     async def close(self):
         """Close peer connections and media player."""
         await super().close()

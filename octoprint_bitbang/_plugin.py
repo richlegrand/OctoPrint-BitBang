@@ -186,10 +186,14 @@ class BitBangPlugin(
                 f"Connection request from {client_id} (browser_ip={browser_ip})"
             )
 
+        # Split transport: the Go proxy (spawned in _start_video_bridge) now
+        # owns signaling + data + HTTP/WS proxy under our shared identity. Python
+        # no longer runs its own bitbang signaling — it only hosts a bare asyncio
+        # loop for aiortc (the video bridge + the local-LAN /offer path).
         self._thread = threading.Thread(
-            target=self._adapter.run,
+            target=self._run_aiortc_loop,
             daemon=True,
-            name="BitBangThread",
+            name="BitBangAiortcLoop",
         )
         self._thread.start()
 
@@ -197,6 +201,124 @@ class BitBangPlugin(
         self._settings.set(["url"], url)
         self._settings.save()
         self._logger.info(f"BitBang remote access: {url}")
+
+        # Split-transport: a supervised Go proxy (data + HTTP/WS over native-SCTP
+        # pion) owns the transport under our shared identity, and our camera
+        # track is fed into a video PeerConnection over a socketpair relay.
+        self._start_video_bridge()
+
+    def _run_aiortc_loop(self):
+        """Bare asyncio loop for aiortc. Replaces the adapter's own bitbang
+        signaling — the Go proxy owns signaling/data/proxy now, so Python only
+        runs the video bridge and the local-LAN /offer path on this loop."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._adapter._loop = loop
+        try:
+            loop.run_forever()
+        finally:
+            loop.close()
+
+    def _go_binary(self):
+        """Resolve the bundled Go proxy binary for this CPU arch (shipped in
+        the wheel under octoprint_bitbang/bin/). Returns None if unsupported."""
+        import os
+        import platform
+        import stat
+
+        arch = {"aarch64": "arm64", "armv7l": "armv7",
+                "armv6l": "armv6", "x86_64": "amd64"}.get(platform.machine())
+        if not arch:
+            self._logger.warning(f"[video-bridge] no Go binary for {platform.machine()}")
+            return None
+        path = os.path.join(os.path.dirname(__file__), "bin", f"bitbang-linux-{arch}")
+        if not os.path.exists(path):
+            self._logger.warning(f"[video-bridge] bundled Go binary missing: {path}")
+            return None
+        try:  # pip/zip don't preserve the exec bit
+            os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        except OSError:
+            pass
+        return path
+
+    def _start_video_bridge(self):
+        import os
+        import socket as _socket
+        import subprocess
+
+        go_bin = self._go_binary()
+        if not go_bin:
+            return
+
+        port = self._settings.global_get(["server", "port"]) or 5000
+        try:
+            logs_dir = self._settings.global_get_basefolder("logs")
+        except Exception:
+            logs_dir = os.path.expanduser("~/.octoprint/logs")
+        log_path = os.path.join(logs_dir, "bitbang-go.log")
+
+        # Stale Go proxies (orphaned by a prior OctoPrint restart) would
+        # re-register our shared UID and conflict — kill them first. Match on
+        # args (path-independent); pkill never matches its own pid.
+        subprocess.run(["pkill", "-f", "serve proxy -program octoprint"], check=False)
+
+        self._go_stop = False
+        threading.Thread(
+            target=self._supervise_go, args=(go_bin, port, log_path),
+            daemon=True, name="BitBangGoSupervisor").start()
+
+    def _launch_bridge(self, parent):
+        import time
+        for _ in range(150):
+            loop = getattr(self._adapter, "_loop", None)
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._adapter.run_video_bridge(parent), loop)
+                self._logger.info("[video-bridge] launched")
+                return
+            time.sleep(0.1)
+        self._logger.warning("[video-bridge] adapter loop never came up")
+
+    def _supervise_go(self, go_bin, port, log_path):
+        """Keep the Go proxy alive: spawn, feed the video bridge, wait()
+        (reaps it), and restart with backoff on exit. Output goes to a
+        line-buffered file so a crash trace is captured verbatim."""
+        import socket as _socket
+        import subprocess
+        import time
+
+        backoff = 1
+        while not self._go_stop:
+            parent, child = _socket.socketpair()
+            try:
+                logf = open(log_path, "a", buffering=1)
+            except Exception:
+                logf = subprocess.DEVNULL
+            # Go shares our identity (-program) → one URL; -target serves
+            # OctoPrint directly on the plain device URL.
+            proc = subprocess.Popen(
+                [go_bin, "serve", "proxy", "-program", "octoprint",
+                 "-target", f"localhost:{port}", "-v", "-video-fd", str(child.fileno())],
+                pass_fds=(child.fileno(),), stdout=logf, stderr=subprocess.STDOUT)
+            child.close()
+            self._go_proc = proc
+            self._logger.info(f"[video-bridge] Go proxy started (pid {proc.pid}); log: {log_path}")
+            self._launch_bridge(parent)
+
+            rc = proc.wait()  # blocks until exit; reaps the process
+            try:
+                parent.close()
+            except Exception:
+                pass
+            if hasattr(logf, "close"):
+                logf.close()
+            if self._go_stop:
+                break
+            self._logger.warning(
+                f"[video-bridge] Go proxy exited (rc={rc}); restarting in {backoff}s "
+                f"— see {log_path}")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 30)
 
     # -- Local WebRTC video signaling --
 
@@ -571,15 +693,28 @@ class BitBangPlugin(
         track = self._adapter.relay.subscribe(self._adapter.player.video)
         decoder = None
         frame = None
+        got_keyframe = False
         try:
             for _ in range(150):  # a keyframe arrives within one GOP (~1s @30fps)
                 obj = await track.recv()
                 if isinstance(obj, _av.VideoFrame):    # software path: raw frame
                     frame = obj
                     break
-                if decoder is None:                    # encoded path: decode H.264
+                # Encoded path: a fresh software H.264 decoder must START at a
+                # keyframe -- the IDR carries SPS/PPS (repeat_sequence_header /
+                # inline headers). Subscribing mid-stream (a long-running print)
+                # yields P-frames first, which decode as "Invalid data found
+                # when processing input"; skip until the first keyframe.
+                if not got_keyframe:
+                    if not getattr(obj, "is_keyframe", False):
+                        continue
+                    got_keyframe = True
+                if decoder is None:
                     decoder = _av.CodecContext.create("h264", "r")
-                decoded = decoder.decode(obj)
+                try:
+                    decoded = decoder.decode(obj)
+                except Exception:                      # tolerate a stray bad packet
+                    continue
                 if decoded:
                     frame = decoded[-1]
                     break

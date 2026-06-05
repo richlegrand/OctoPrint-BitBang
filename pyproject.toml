@@ -57,4 +57,5 @@ octoprint_bitbang = [
     "*.html",
     "static/**/*",
     "templates/**/*",
+    "bin/*",
 ]

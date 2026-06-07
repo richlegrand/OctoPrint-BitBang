@@ -1,0 +1,4 @@
+# The proxy binaries are built by CI (or scripts/build-proxy.sh) into bin/ and
+# are gitignored, so the sdist must include them explicitly here. The wheel
+# picks them up via [tool.setuptools.package-data] in pyproject.toml.
+recursive-include octoprint_bitbang/bin *

@@ -3,6 +3,7 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  workflow_dispatch:   # manual build (no publish) to verify the binaries bundle
 
 jobs:
   publish:
@@ -10,6 +11,27 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # The proxy binaries are not committed; they're cross-compiled from the
+      # bitbangproxy Go source at build time and bundled into the package. Pin a
+      # tag via the BITBANGPROXY_REF repo variable for reproducible releases.
+      # bitbangproxy must be readable by this workflow: if it's public the
+      # default token works; if private, add a BITBANGPROXY_TOKEN secret (a PAT
+      # with read access).
+      - name: Checkout bitbangproxy (Go source)
+        uses: actions/checkout@v4
+        with:
+          repository: richlegrand/bitbangproxy
+          ref: ${{ vars.BITBANGPROXY_REF || 'main' }}
+          path: _bitbangproxy
+          token: ${{ secrets.BITBANGPROXY_TOKEN || github.token }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: _bitbangproxy/go.mod
+
+      - name: Cross-compile + bundle proxy binaries
+        run: ./scripts/build-proxy.sh _bitbangproxy
 
       - uses: actions/setup-python@v5
         with:
@@ -20,7 +42,26 @@ jobs:
           pip install build
           python -m build
 
+      - name: Verify binaries are bundled in the wheel
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          whl = glob.glob('dist/*.whl')[0]
+          names = zipfile.ZipFile(whl).namelist()
+          bins = sorted(n for n in names if '/bin/bitbang-linux-' in n)
+          print('bundled in', whl + ':', bins)
+          assert any('arm64' in b for b in bins), 'arm64 binary missing from wheel'
+          assert any('armv7' in b for b in bins), 'armv7 binary missing from wheel'
+          PY
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
       - name: Publish to PyPI
+        if: github.event_name == 'release'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}

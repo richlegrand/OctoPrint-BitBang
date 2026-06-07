@@ -299,7 +299,7 @@
     function createVideo(attrs) {
         var video = document.createElement("video");
         video.autoplay = true;
-        video.playsinline = true;
+        video.playsInline = true;
         video.muted = true;
         for (var k in attrs) video.setAttribute(k, attrs[k]);
         return video;

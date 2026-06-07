@@ -296,10 +296,15 @@ class BitBangPlugin(
                 logf = subprocess.DEVNULL
             # Go shares our identity (-program) → one URL; -target serves
             # OctoPrint directly on the plain device URL.
+            args = [go_bin, "serve", "proxy", "-program", "octoprint",
+                    "-target", f"localhost:{port}", "-v", "-video-fd", str(child.fileno())]
+            # The Go proxy owns the data channel + signaling, so it's what must
+            # enforce the PIN — passing it to the Python adapter does nothing now.
+            pin = (self._settings.get(["pin"]) or "").strip()
+            if pin:
+                args += ["-pin", pin]
             proc = subprocess.Popen(
-                [go_bin, "serve", "proxy", "-program", "octoprint",
-                 "-target", f"localhost:{port}", "-v", "-video-fd", str(child.fileno())],
-                pass_fds=(child.fileno(),), stdout=logf, stderr=subprocess.STDOUT)
+                args, pass_fds=(child.fileno(),), stdout=logf, stderr=subprocess.STDOUT)
             child.close()
             self._go_proc = proc
             self._logger.info(f"[video-bridge] Go proxy started (pid {proc.pid}); log: {log_path}")

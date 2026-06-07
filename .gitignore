@@ -206,7 +206,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# BitBang Go proxy binaries: built from bitbangproxy source by CI and bundled
+# BitBang Go proxy binaries: built from bitbang-cli source by CI and bundled
 # into the package — not committed. Run scripts/build-proxy.sh for local
 # editable-install testing.
 octoprint_bitbang/bin/

@@ -2,24 +2,24 @@
 # Cross-compile the BitBang Go proxy and bundle it into the plugin.
 #
 # The proxy binaries are NOT committed to this repo; they're built from the
-# bitbangproxy Go source — by CI for releases (.github/workflows/publish.yml),
+# bitbang-cli Go source — by CI for releases (.github/workflows/publish.yml),
 # and by this script for local editable-install testing.
 #
 # Usage:
-#   scripts/build-proxy.sh [path-to-bitbangproxy]   (default: ../bitbangproxy)
+#   scripts/build-proxy.sh [path-to-bitbang-cli]   (default: ../bitbang-cli)
 #
 # Pure-Go static builds (CGO_ENABLED=0) so they cross-compile from any host with
 # no C toolchain. Output lands in octoprint_bitbang/bin/, where the plugin
 # selects the right one at runtime via platform.machine().
 set -euo pipefail
 
-SRC="${1:-../bitbangproxy}"
+SRC="${1:-../bitbang-cli}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/octoprint_bitbang/bin"
 
 if [ ! -d "$SRC/cmd/bitbang" ]; then
-    echo "error: bitbangproxy source not found at '$SRC' (need $SRC/cmd/bitbang)" >&2
-    echo "usage: scripts/build-proxy.sh [path-to-bitbangproxy]" >&2
+    echo "error: bitbang-cli source not found at '$SRC' (need $SRC/cmd/bitbang)" >&2
+    echo "usage: scripts/build-proxy.sh [path-to-bitbang-cli]" >&2
     exit 1
 fi
 SRC="$(cd "$SRC" && pwd)"

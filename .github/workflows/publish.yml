@@ -13,25 +13,22 @@ jobs:
       - uses: actions/checkout@v4
 
       # The proxy binaries are not committed; they're cross-compiled from the
-      # bitbangproxy Go source at build time and bundled into the package. Pin a
-      # tag via the BITBANGPROXY_REF repo variable for reproducible releases.
-      # bitbangproxy must be readable by this workflow: if it's public the
-      # default token works; if private, add a BITBANGPROXY_TOKEN secret (a PAT
-      # with read access).
-      - name: Checkout bitbangproxy (Go source)
+      # bitbang-cli Go source at build time and bundled into the package. Pin a
+      # tag via the BITBANG_CLI_REF repo variable for reproducible releases.
+      # bitbang-cli is public, so the default workflow token can read it.
+      - name: Checkout bitbang-cli (Go source)
         uses: actions/checkout@v4
         with:
-          repository: richlegrand/bitbangproxy
-          ref: ${{ vars.BITBANGPROXY_REF || 'main' }}
-          path: _bitbangproxy
-          token: ${{ secrets.BITBANGPROXY_TOKEN || github.token }}
+          repository: richlegrand/bitbang-cli
+          ref: ${{ vars.BITBANG_CLI_REF || 'main' }}
+          path: _bitbang-cli
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: _bitbangproxy/go.mod
+          go-version-file: _bitbang-cli/go.mod
 
       - name: Cross-compile + bundle proxy binaries
-        run: ./scripts/build-proxy.sh _bitbangproxy
+        run: ./scripts/build-proxy.sh _bitbang-cli
 
       - uses: actions/setup-python@v5
         with:

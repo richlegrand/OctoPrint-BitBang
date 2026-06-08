@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "OctoPrint-BitBang"
-version = "0.1.8"
+version = "0.2.0"
 description = "Remote OctoPrint access with live H.264 video via BitBang WebRTC"
 readme = "README.md"
 license = "MIT"
@@ -30,9 +30,13 @@ dependencies = [
     "aiohttp>=3.8.0",
     "Pillow>=9.0.0",
     "numpy>=1.20.0",
-    # aiortc/av come transitively via bitbang; pin them here so 32-bit
-    # (armv7l) OctoPi resolves to versions that work against the system
-    # FFmpeg 5.1 (av>=14 expects FFmpeg 7 -> "libavformat.so.61" load failure).
+    # aiortc/av come transitively via bitbang. aiortc<1.11 already caps av<14.
+    # 32-bit (armv7l) has NO PyAV wheels at any in-range version, so av builds
+    # from source against the system FFmpeg (Bookworm 5.1); av<12 lands it on the
+    # FFmpeg-5 generation that compiles. aarch64 is intentionally NOT pinned: PyPI
+    # ships manylinux aarch64 wheels with bundled FFmpeg for av 12-13, so pip
+    # resolves to av 13.x (bundled) and ignores the system FFmpeg. Pinning aarch64
+    # to av<12 would force a wheelless source build that fails on OctoPi-64.
     "aiortc<1.11",
     "av<12; platform_machine == 'armv7l'",
 ]

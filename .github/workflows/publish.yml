@@ -49,6 +49,7 @@ jobs:
           print('bundled in', whl + ':', bins)
           assert any('arm64' in b for b in bins), 'arm64 binary missing from wheel'
           assert any('armv7' in b for b in bins), 'armv7 binary missing from wheel'
+          assert any('amd64' in b for b in bins), 'amd64 binary missing from wheel'
           PY
 
       - name: Upload build artifacts

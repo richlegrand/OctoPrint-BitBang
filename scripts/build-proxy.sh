@@ -34,10 +34,11 @@ build() {
     chmod +x "$OUT/$name"
 }
 
-# Arches the plugin bundles (Raspberry Pi 3/4/5, 32- and 64-bit).
-# Add amd64 / armv6 here to widen support.
+# Arches the plugin bundles (Pi 3/4/5 32- and 64-bit, plus x86_64 hosts).
+# Add armv6 here to widen support further.
 build arm64 ""  bitbang-linux-arm64
 build arm   "7" bitbang-linux-armv7
+build amd64 ""  bitbang-linux-amd64
 
 echo "bundled into $OUT:"
 ls -la "$OUT"

@@ -46,6 +46,8 @@ pip install OctoPrint-BitBang
 
 Restart OctoPrint.
 
+> **Pi CSI camera:** `picamera2` (the Pi camera driver) is a system package, so the venv must be created with `python3 -m venv --system-site-packages` to see it. Without that, the CSI camera isn't detected and the plugin falls back to USB. USB webcams aren't affected -- details in [Installation Notes](#installation-notes).
+
 ### Did it work?
 
 After OctoPrint restarts, you should see a **BitBang** button in the navbar and a new **BitBang** entry in Settings. If both are there, you're done -- continue to [Usage](#usage).
@@ -169,6 +171,24 @@ pip install --no-binary aiortc --force-reinstall --no-deps "aiortc<1.11"
 ### Old Python (3.9 or earlier)
 
 `av` wheels start at Python 3.10, so OctoPi 1.0.x (Python 3.9) has no usable wheel -- upgrade the image to 1.1.0.
+
+### Pi CSI camera not detected (falls back to USB)
+
+The Pi CSI camera is driven through [`picamera2`](https://github.com/raspberrypi/picamera2), a **system** package installed via `apt` -- it is not on PyPI. Your OctoPrint venv can only import it if the venv was created with access to system site-packages. If it can't, CSI auto-detect fails and the plugin **silently falls back to a USB webcam** (or no camera) -- the plugin still loads, so the only symptom is the wrong camera.
+
+Check from inside your OctoPrint venv:
+
+```bash
+python -c "import picamera2"   # ImportError -> the venv cannot see picamera2
+```
+
+If that errors, recreate the venv with system site-packages and reinstall OctoPrint and the plugin into it:
+
+```bash
+python3 -m venv --system-site-packages /path/to/oprint
+```
+
+USB webcams work in a plain venv -- this only affects the Pi CSI camera.
 
 ### Diagnostic mode
 

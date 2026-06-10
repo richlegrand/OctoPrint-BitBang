@@ -5,7 +5,7 @@ No account, no subscription, no port forwarding. One shareable link.
 """
 
 __plugin_name__ = "BitBang"
-__plugin_version__ = "0.2.1"
+__plugin_version__ = "0.2.2"
 __plugin_description__ = "Remote OctoPrint access with live H.264 video via BitBang WebRTC. No account, no port forwarding, one shareable link."
 __plugin_url__ = "https://github.com/richlegrand/OctoPrint-BitBang"
 __plugin_author__ = "Rich LeGrand"

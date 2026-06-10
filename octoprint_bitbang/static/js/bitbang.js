@@ -253,12 +253,28 @@
     // Connect video via local offer/answer endpoint. Works on LAN and
     // remotely (fetches TURN servers). Can be called with an existing
     // video element (fallback from remote mode) or creates its own.
-    function connectLocalVideo(video) {
+    function connectLocalVideo(video, attempt) {
+        // On a fresh page load the OctoPrint session's CSRF token may not be
+        // established yet, so the first POST /plugin/bitbang/offer can come back
+        // 400/403. Retry a bounded number of times so the stream comes up on its
+        // own instead of requiring a manual page refresh.
+        attempt = attempt || 0;
+        var MAX_ATTEMPTS = 10;
+        var RETRY_MS = 1500;
+        var pc = null;
+        function retry(why) {
+            if (pc) { try { pc.close(); } catch (e) {} }
+            if (attempt + 1 < MAX_ATTEMPTS) {
+                setTimeout(function () { connectLocalVideo(video, attempt + 1); }, RETRY_MS);
+            } else {
+                console.log("[BitBang] Local video gave up after retries:", why);
+            }
+        }
         fetch("/plugin/bitbang/ice-servers").then(function (r) {
             return r.json();
         }).then(function (iceServers) {
             var config = (iceServers && iceServers.length > 0) ? { iceServers: iceServers } : {};
-            var pc = new RTCPeerConnection(config);
+            pc = new RTCPeerConnection(config);
 
             pc.ontrack = function (event) {
                 if (event.streams && event.streams[0]) {
@@ -283,16 +299,21 @@
                     })
                 });
             }).then(function (response) {
-                return response.json();
-            }).then(function (answer) {
-                if (answer.error) {
-                    console.log("[BitBang] Local video not available:", answer.error);
+                if (!response.ok) {
+                    // 400 (CSRF token not ready yet), 403 (not logged in yet), etc.
+                    retry("offer HTTP " + response.status);
                     return;
                 }
-                return pc.setRemoteDescription(answer);
+                return response.json().then(function (answer) {
+                    if (answer.error) {
+                        console.log("[BitBang] Local video not available:", answer.error);
+                        return;
+                    }
+                    return pc.setRemoteDescription(answer);
+                });
             });
         }).catch(function (err) {
-            console.log("[BitBang] Local video failed:", err);
+            retry(String(err));
         });
     }
 

@@ -1,11 +1,13 @@
 /*
  * OctoPrint-BitBang - H.264 video for OctoPrint
  *
- * Two modes:
- * - Remote (via BitBang): replaces MJPEG <img> with <video> wired to
- *   BitBang's WebRTC stream (bootstrap.js handles the track)
- * - Local (direct access): creates a WebRTC peer connection to the
- *   plugin's /offer endpoint for H.264 video on the LAN
+ * The live view is rendered by our webcam provider template
+ * (bitbang_webcam.jinja2) as <video id="bitbang-webcam">. This script
+ * decorates that element and wires the stream:
+ * - Remote (via BitBang): bootstrap.js attaches the WebRTC track via the
+ *   data-bitbang-stream attribute.
+ * - Local (direct access): opens a WebRTC peer connection to the plugin's
+ *   /offer endpoint for H.264 video on the LAN.
  */
 (function () {
     var isBitBang = !!window.__bbSessionId;
@@ -16,7 +18,9 @@
 
         var btn = document.createElement("button");
         btn.className = "btn btn-mini";
-        btn.style.cssText = "position:absolute;top:8px;right:8px;z-index:10;opacity:0.6;cursor:pointer;pointer-events:auto";
+        // Lower-left: clear of OctoPrint's webcam switcher (top-right) and our
+        // brightness slider (bottom-right).
+        btn.style.cssText = "position:absolute;bottom:8px;left:8px;z-index:10;opacity:0.6;cursor:pointer;pointer-events:auto";
         btn.innerHTML = '<i class="fas fa-expand"></i>';
         btn.title = "Fullscreen";
         btn.onmouseover = function () { btn.style.opacity = "1"; };
@@ -183,43 +187,21 @@
         video.addEventListener("resize", reflow);
     }
 
-    function replaceWebcam(video) {
+    // Decorate the <video> element OctoPrint renders from our webcam provider
+    // template (bitbang_webcam.jinja2): sizing, fullscreen button, status overlay
+    // and the brightness control. We no longer touch the classic webcam's DOM --
+    // OctoPrint shows our template only when "BitBang Camera" is the selected webcam.
+    function decorateVideo(video) {
+        if (video.dataset.bbDecorated) return;
+        video.dataset.bbDecorated = "1";
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
         video.style.backgroundColor = "#000";
         applyVideoSizing(video);
-
-        // OctoPrint 1.11+ Classic Webcam hides its default containers until
-        // a stream URL is configured. Mount into the outer container so
-        // we're visible regardless of the user's webcam settings.
-        var classicContainer = document.getElementById("classicwebcam_container");
-        if (classicContainer) {
-            // Knockout visibility bindings on classicwebcam's built-in
-            // containers keep re-showing them, so use a stylesheet rule
-            // which beats Knockout's inline style.display assignments.
-            if (!document.getElementById("bitbang-hide-classicwebcam")) {
-                var style = document.createElement("style");
-                style.id = "bitbang-hide-classicwebcam";
-                style.textContent =
-                    "#webcam_video_container, #webcam_img_container " +
-                    "{ display: none !important; }" +
-                    "#classicwebcam_container " +
-                    "{ padding: 0 !important; line-height: 0 !important; font-size: 0 !important; }";
-                document.head.appendChild(style);
-            }
-            classicContainer.appendChild(video);
-            addFullscreenButton(video);
-            addStatusOverlay(video);
-            applyCameraConfig(video);
-            return true;
-        }
-
-        // Fallback for other layouts: replace #webcam_image in place.
-        var img = document.getElementById("webcam_image");
-        if (!img) return false;
-        img.parentNode.replaceChild(video, img);
         addFullscreenButton(video);
         addStatusOverlay(video);
         applyCameraConfig(video);
-        return true;
     }
 
     // Intercept download links that use absolute URLs. OctoPrint
@@ -317,44 +299,25 @@
         });
     }
 
-    function createVideo(attrs) {
-        var video = document.createElement("video");
-        video.autoplay = true;
-        video.playsInline = true;
-        video.muted = true;
-        for (var k in attrs) video.setAttribute(k, attrs[k]);
-        return video;
-    }
-
-    function whenWebcamReady(callback) {
-        if (document.readyState === "loading") {
-            document.addEventListener("DOMContentLoaded", callback);
-        } else {
-            callback();
-        }
+    // Wait for OctoPrint to render our webcam template's
+    // <video id="bitbang-webcam">, then hand it to the callback once.
+    function whenVideoReady(callback) {
+        var existing = document.getElementById("bitbang-webcam");
+        if (existing) { callback(existing); return; }
         var observer = new MutationObserver(function () {
-            if (document.getElementById("webcam_image") ||
-                document.getElementById("classicwebcam_container")) {
-                callback();
-            }
+            var el = document.getElementById("bitbang-webcam");
+            if (el) { observer.disconnect(); callback(el); }
         });
         observer.observe(document.body, { childList: true, subtree: true });
     }
 
-    if (isBitBang) {
-        // Remote mode: bootstrap.js wires the track via data-bitbang-stream
-        whenWebcamReady(function () {
-            if (document.querySelector("video[data-bitbang-stream]")) return;
-            var video = createVideo({"data-bitbang-stream": "camera"});
-            replaceWebcam(video);
-        });
-    } else {
-        // Local mode: direct WebRTC to the plugin's signaling endpoint
-        whenWebcamReady(function () {
-            if (document.querySelector("video[data-bitbang-local]")) return;
-            var video = createVideo({"data-bitbang-local": "1"});
-            if (!replaceWebcam(video)) return;
+    whenVideoReady(function (video) {
+        decorateVideo(video);
+        // Remote (via BitBang URL): bootstrap.js attaches the WebRTC track
+        // through the data-bitbang-stream attribute already on the element.
+        // Local (direct LAN access): open a peer connection to /offer.
+        if (!isBitBang) {
             connectLocalVideo(video);
-        });
-    }
+        }
+    });
 })();

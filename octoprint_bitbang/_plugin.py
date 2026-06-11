@@ -760,6 +760,10 @@ class BitBangPlugin(
         return [
             {"type": "settings", "custom_bindings": False},
             {"type": "navbar", "custom_bindings": False},
+            # Render the live view as a proper webcam provider template so
+            # OctoPrint shows it only when "BitBang Camera" is the selected
+            # webcam -- no DOM-replacing the classic webcam.
+            {"type": "webcam", "name": "BitBang Camera", "template": "bitbang_webcam.jinja2"},
         ]
 
     def get_template_vars(self):

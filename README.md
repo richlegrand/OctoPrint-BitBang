@@ -22,75 +22,54 @@ This is part of the [BitBang project](https://github.com/richlegrand/bitbang).
 
 ## Installation
 
-### Plugin Manager (recommended, once accepted into the OctoPrint plugin registry)
-
-In OctoPrint: **Settings → Plugin Manager → Get More**, search for **BitBang**, click **Install**.
-
-### Plugin Manager, install from URL
-
-**Settings → Plugin Manager → Get More → "… from URL"**, then paste:
-
-```
-https://github.com/richlegrand/OctoPrint-BitBang/archive/main.zip
-```
-
-Click **Install**, then restart OctoPrint when prompted.
-
-### pip
-
-Inside your OctoPrint venv:
+1. Install from PyPI:
 
 ```bash
 pip install OctoPrint-BitBang
 ```
 
-Restart OctoPrint.
+Don't install from the GitHub source zip — it omits the bundled proxy binaries, so remote access and video won't work.
 
-> **Pi CSI camera:** `picamera2` (the Pi camera driver) is a system package, so the venv must be created with `python3 -m venv --system-site-packages` to see it. Without that, the CSI camera isn't detected and the plugin falls back to USB. USB webcams aren't affected -- details in [Installation Notes](#installation-notes).
+On 32-bit Raspberry Pi OS (`armv7l`, the standard OctoPi image), run these commands first:
 
-### Did it work?
-
-After OctoPrint restarts, you should see a **BitBang** button in the navbar and a new **BitBang** entry in Settings. If both are there, you're done -- continue to [Usage](#usage).
-
-If the plugin doesn't show up, or `octoprint.log` contains `BitBang plugin not loaded` or `BitBang video stack unavailable`, see [Installation Notes](#installation-notes) -- usually a pre-3.10 Python image, or (on 32-bit) an `aiortc`/`libvpx` mismatch that needs one extra step.
-
-## Usage
-
-1. If you are using a separate program for camera streaming (e.g. camera-streamer, mjpg-streamer, ustreamer) you should stop these processes before running BitBang plugin to avoid camera access contention. See commands below.
-
-Stable octopi stack:
 ```bash
-sudo systemctl stop webcamd
-sudo systemctl stop ffmpeg_hls
-sudo systemctl disable webcamd
-sudo systemctl disable ffmpeg_hls
+sudo apt install -y libvpx-dev libopus-dev libsrtp2-dev
+~/oprint/bin/pip install --no-binary aiortc,pylibsrtp --force-reinstall --no-deps aiortc==1.10.1 pylibsrtp==1.0.0
 ```
 
-New camera stack:
+64-bit and x86_64 need nothing further.
+
+2. Free the camera from OctoPi's default streamer:
+
 ```bash
-sudo systemctl stop camera-streamer
-sudo systemctl disable camera-streamer
+sudo systemctl disable --now webcamd ffmpeg_hls camera_streamer
+sudo systemctl restart octoprint
 ```
 
-2. Point your browser to your local OctoPrint server. Open **Settings → BitBang**.
-3. Choose camera from dropdown.
+3. Restart OctoPrint (usually with `sudo systemctl restart octoprint`).
+
+4. Point your browser to your OctoPrint server, open the Control tab, and choose **BitBang Camera** from the webcam selector at the top-right. 
+
+5. Open **Settings → BitBang** and choose camera from dropdown.
 
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/camera_select.png)
 
-4. Choose resolution.
+6. Choose resolution.
 
 ![Resolution dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/resolution_select.png)
 
-5. Set a PIN (Optional).
-6. Save and **restart OctoPrint**.
-7. Refresh the OctoPrint tab in your browser. A button labeled BitBang is available in the menu bar -- click it for the URL.
+
+7. Save and **restart OctoPrint**.
+
+8. Refresh the OctoPrint tab in your browser. A button labeled BitBang is available in the menu bar -- click it for the URL.
 
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/bitbang_select.png)
 
 ![BitBang URL](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/bitbang_url.png)
 
-
 This URL allows remote access to your printer.
+
+9. Set `Snapshot Webcam` in **Settings → Webcam and Timelapse** to `BitBang Camera` if you want timelapse video/images of your prints. 
 
 ## Configuration
 
@@ -109,7 +88,7 @@ All settings take effect on OctoPrint restart. Full-screen button and brightness
 ## How it works
 
 - The `bitbang-python` package handles WebRTC signaling, identity, and the ASGI interface.
-- This plugin wraps it with OctoPrint integration: settings UI, `WebcamProviderPlugin` hooks, camera auto-detect, CSRF-safe cookie handling, and the JavaScript that injects the `<video>` element into OctoPrint's Control tab.
+- This plugin wraps it with OctoPrint integration: settings UI, `WebcamProviderPlugin` hooks, camera auto-detect, CSRF-safe cookie handling, and a webcam-provider template that renders the H.264 `<video>` in OctoPrint's Control tab.
 - The bitba.ng cloud acts purely as a signaling relay to broker a direct connection. If a direct connection isn't available, bitba.ng will use TURN instead.
 
 ## Privacy
@@ -136,41 +115,9 @@ See the [BitBang project page](https://github.com/richlegrand/bitbang) for the f
 
 ## Installation Notes
 
-If the basic [Installation](#installation) worked, skip this section.
+Skip this if [Installation](#installation) worked.
 
-The video stack depends on `av` ([PyAV](https://github.com/PyAV-Org/PyAV)) and `aiortc`, installed as prebuilt wheels. As of v0.1.7 the plugin pins them (`aiortc<1.11`, and `av<12` on 32-bit ARM) so pip resolves to versions that work on current OctoPi -- **including the 32-bit stable image**:
-
-- **64-bit Linux** (`aarch64`/`x86_64`) -- PyPI ships `av` wheels with FFmpeg bundled; nothing system-level needed.
-- **32-bit Raspberry Pi OS** (`armv7l`) -- [piwheels](https://www.piwheels.org/) ships an `av` wheel built against the **system FFmpeg 5.1**, and the `av<12` pin selects it. Supported, with one possible extra step (see below).
-- **Python 3.10+** is required either way (`av` wheels start at cp310).
-
-### Quick check
-
-```bash
-uname -m            # aarch64 = 64-bit Pi; armv7l = 32-bit (also supported)
-python --version    # must be 3.10 or newer
-```
-
-### By OctoPi version
-
-| Version | Notes |
-|---|---|
-| **1.1.0** | Bookworm + Python 3.11. The **stable image is 32-bit** (`armv7l`) on every Pi model; 64-bit is nightly-only. v0.1.7 supports both. |
-| **1.0.x** | Bullseye + Python 3.9 -- below the 3.10 minimum. Upgrade to 1.1.0. |
-| **Pre-1.0** | Older base. Upgrade. |
-
-### 32-bit: aiortc / libvpx mismatch
-
-On some 32-bit images the piwheels `aiortc` wheel is built against a newer `libvpx` than the OS ships, so `octoprint.log` shows `BitBang video stack unavailable: libvpx.so.9: cannot open shared object file`. Install the codec dev headers and rebuild aiortc against the system libvpx (in your OctoPrint venv):
-
-```bash
-sudo apt install -y libvpx-dev libopus-dev
-pip install --no-binary aiortc --force-reinstall --no-deps "aiortc<1.11"
-```
-
-### Old Python (3.9 or earlier)
-
-`av` wheels start at Python 3.10, so OctoPi 1.0.x (Python 3.9) has no usable wheel -- upgrade the image to 1.1.0.
+The video stack is `av` ([PyAV](https://github.com/PyAV-Org/PyAV)) + `aiortc`, pulled in as wheels, and needs **Python 3.10+** — OctoPi 1.0.x (Bullseye / Python 3.9) has no usable `av` wheel, so upgrade the image to 1.1.0+. On **64-bit** (`aarch64` / `x86_64`) the PyPI wheels bundle their native libraries and work as-is; **32-bit** (`armv7l`) needs the extra step in [Installation](#installation) above, because its [piwheels](https://www.piwheels.org/) wheels link newer system libraries than Bookworm ships.
 
 ### Pi CSI camera not detected (falls back to USB)
 

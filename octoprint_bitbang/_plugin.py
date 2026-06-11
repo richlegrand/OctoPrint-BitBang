@@ -233,7 +233,13 @@ class BitBangPlugin(
             return None
         path = os.path.join(os.path.dirname(__file__), "bin", f"bitbang-linux-{arch}")
         if not os.path.exists(path):
-            self._logger.warning(f"[video-bridge] bundled Go binary missing: {path}")
+            self._logger.warning(
+                f"[video-bridge] bundled Go binary missing: {path} -- remote "
+                f"access and video are disabled. The proxy binaries ship only in "
+                f"the PyPI package (and CI release artifacts), not the GitHub "
+                f"source archive. Reinstall with 'pip install -U OctoPrint-BitBang' "
+                f"(or remove + reinstall) to pull it."
+            )
             return None
         try:  # pip/zip don't preserve the exec bit
             os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

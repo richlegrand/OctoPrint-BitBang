@@ -8,6 +8,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach release.zip to the GitHub release
 
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +31,22 @@ jobs:
 
       - name: Cross-compile + bundle proxy binaries
         run: ./scripts/build-proxy.sh _bitbang-cli
+
+      # Zip the source tree together with the just-built bin/ binaries. This is
+      # what OctoPrint's Plugin Manager installs from -- it pip-installs an
+      # archive URL, not a PyPI name -- so the registry listing's `archive:`
+      # field points at this asset (releases/latest/download/release.zip).
+      - name: Bundle source + binaries into release.zip
+        run: |
+          zip -r release.zip . -x '.git/*' '_bitbang-cli/*' 'dist/*' '*.zip'
+          python - <<'PY'
+          import zipfile
+          names = zipfile.ZipFile('release.zip').namelist()
+          bins = sorted(n for n in names if 'octoprint_bitbang/bin/bitbang-linux-' in n)
+          print('bundled in release.zip:', bins)
+          for arch in ('arm64', 'armv7', 'amd64'):
+              assert any(arch in b for b in bins), f'{arch} binary missing from release.zip'
+          PY
 
       - uses: actions/setup-python@v5
         with:
@@ -56,10 +74,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist/*
+          path: |
+            dist/*
+            release.zip
 
       - name: Publish to PyPI
         if: github.event_name == 'release'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Attach release.zip to the GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release.zip

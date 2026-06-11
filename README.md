@@ -22,15 +22,17 @@ This is part of the [BitBang project](https://github.com/richlegrand/bitbang).
 
 ## Installation
 
-1. Install from PyPI:
+### Prerequisites
+
+These steps are outside the plugin — do them first.
+
+**Free the camera** from OctoPi's default streamer:
 
 ```bash
-pip install OctoPrint-BitBang
+sudo systemctl disable --now webcamd ffmpeg_hls camera-streamer
 ```
 
-Don't install from the GitHub source zip — it omits the bundled proxy binaries, so remote access and video won't work.
-
-On 32-bit Raspberry Pi OS (`armv7l`, the standard OctoPi image), run these commands first:
+**32-bit Raspberry Pi OS** (`armv7l`, the standard OctoPi image) also needs `aiortc` and `pylibsrtp` rebuilt once, because its [piwheels](https://www.piwheels.org/) wheels link newer system libraries than Bookworm ships:
 
 ```bash
 sudo apt install -y libvpx-dev libopus-dev libsrtp2-dev
@@ -39,29 +41,34 @@ sudo apt install -y libvpx-dev libopus-dev libsrtp2-dev
 
 64-bit and x86_64 need nothing further.
 
-2. Free the camera from OctoPi's default streamer:
+### Install the plugin
 
-```bash
-sudo systemctl disable --now webcamd ffmpeg_hls camera_streamer
-sudo systemctl restart octoprint
+In OctoPrint, open **Settings → Plugin Manager → Get More**, choose **... from URL**, and paste:
+
+```
+https://github.com/richlegrand/OctoPrint-BitBang/releases/latest/download/release.zip
 ```
 
-3. Restart OctoPrint (usually with `sudo systemctl restart octoprint`).
+Once the plugin is accepted into OctoPrint's repository you'll also be able to find it by searching for "BitBang". Prefer the command line? `~/oprint/bin/pip install OctoPrint-BitBang` installs the same package. Either way, don't install from the GitHub source zip — it omits the bundled proxy binaries, so remote access and video won't work.
 
-4. Point your browser to your OctoPrint server, open the Control tab, and choose **BitBang Camera** from the webcam selector at the top-right. 
+### Set up the camera
 
-5. Open **Settings → BitBang** and choose camera from dropdown.
+1. Restart OctoPrint to load the plugin — `sudo systemctl restart octoprint` (Plugin Manager offers to do this for you).
+
+2. Point your browser to your OctoPrint server, open the Control tab, and choose **BitBang Camera** from the webcam selector at the top-right.
+
+3. Open **Settings → BitBang** and choose camera from dropdown.
 
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/camera_select.png)
 
-6. Choose resolution.
+4. Choose resolution.
 
 ![Resolution dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/resolution_select.png)
 
 
-7. Save and **restart OctoPrint**.
+5. Save and **restart OctoPrint**.
 
-8. Refresh the OctoPrint tab in your browser. A button labeled BitBang is available in the menu bar -- click it for the URL.
+6. Refresh the OctoPrint tab in your browser. A button labeled BitBang is available in the menu bar -- click it for the URL.
 
 ![Camera dropdown](https://raw.githubusercontent.com/richlegrand/OctoPrint-BitBang/refs/heads/main/assets/bitbang_select.png)
 
@@ -69,7 +76,7 @@ sudo systemctl restart octoprint
 
 This URL allows remote access to your printer.
 
-9. Set `Snapshot Webcam` in **Settings → Webcam and Timelapse** to `BitBang Camera` if you want timelapse video/images of your prints. 
+7. Set `Snapshot Webcam` in **Settings → Webcam and Timelapse** to `BitBang Camera` if you want timelapse video/images of your prints.
 
 ## Configuration
 

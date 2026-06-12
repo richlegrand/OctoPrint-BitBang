@@ -801,6 +801,6 @@ def _get_update_information():
                 "branch": "main",
                 "commitish": ["main"],
             },
-            "pip": "https://github.com/richlegrand/OctoPrint-BitBang/archive/{target_version}.zip",
+            "pip": "https://github.com/richlegrand/OctoPrint-BitBang/releases/download/{target_version}/release.zip",
         }
     }

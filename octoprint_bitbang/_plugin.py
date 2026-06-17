@@ -201,6 +201,9 @@ class BitBangPlugin(
         self._settings.set(["url"], url)
         self._settings.save()
         self._logger.info(f"BitBang remote access: {url}")
+        # Push the URL to the frontend so the navbar reflects it live, instead
+        # of the browser polling the settings API.
+        self._plugin_manager.send_plugin_message(self._identifier, {"url": url})
 
         # Split-transport: a supervised Go proxy (data + HTTP/WS over native-SCTP
         # pion) owns the transport under our shared identity, and our camera
@@ -764,8 +767,8 @@ class BitBangPlugin(
 
     def get_template_configs(self):
         return [
-            {"type": "settings", "custom_bindings": False},
-            {"type": "navbar", "custom_bindings": False},
+            {"type": "settings", "custom_bindings": True},
+            {"type": "navbar", "custom_bindings": True},
             # Render the live view as a proper webcam provider template so
             # OctoPrint shows it only when "BitBang Camera" is the selected
             # webcam -- no DOM-replacing the classic webcam.

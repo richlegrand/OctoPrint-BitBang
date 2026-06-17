@@ -321,3 +321,81 @@
         }
     });
 })();
+
+/*
+ * Settings + navbar viewmodel.
+ *
+ * The navbar link and the camera/resolution dropdowns used to read plugin
+ * state via raw fetch('/api/settings') + manual DOM. This binds them through
+ * the standard settingsViewModel and Knockout instead: settings come from the
+ * settings observable, camera lists from the plugin's blueprint endpoints, and
+ * the live remote URL arrives via a plugin message (no polling).
+ */
+function BitBangViewModel(parameters) {
+    var self = this;
+    self.settings = parameters[0];
+
+    self.cameras = ko.observableArray([]);
+    self.resolutions = ko.observableArray([]);
+    self.remoteUrl = ko.observable("");
+
+    function bb() { return self.settings.settings.plugins.bitbang; }
+
+    self.loadResolutions = function (device) {
+        return OctoPrint.get(
+            "plugin/bitbang/resolutions?device=" + encodeURIComponent(device || "")
+        ).done(function (resolutions) {
+            self.resolutions(resolutions);
+            // Keep the saved resolution if it's still valid for this device,
+            // otherwise fall back to the first available.
+            if (resolutions.indexOf(bb().camera_resolution()) < 0) {
+                bb().camera_resolution(resolutions[0] || "");
+            }
+        });
+    };
+
+    self.loadCameras = function () {
+        return OctoPrint.get("plugin/bitbang/cameras").done(function (cameras) {
+            // Lead with an explicit auto-detect entry (value "") so the saved
+            // empty setting round-trips cleanly.
+            self.cameras([{ device: "", name: "Auto-detect" }].concat(cameras));
+            self.loadResolutions(bb().camera_device());
+        });
+    };
+
+    self.refreshCameras = function () { self.loadCameras(); };
+
+    self.showUrl = function () {
+        var url = self.remoteUrl();
+        if (url) {
+            window.prompt("BitBang URL (Ctrl+C to copy):", url);
+        } else {
+            alert("BitBang URL not available yet");
+        }
+    };
+
+    // Repopulate the dropdowns each time the settings dialog opens.
+    self.onSettingsShown = function () { self.loadCameras(); };
+
+    self.onStartupComplete = function () {
+        self.remoteUrl(bb().url() || "");
+        // Reload resolutions whenever the selected camera changes.
+        bb().camera_device.subscribe(function (device) {
+            self.loadResolutions(device);
+        });
+    };
+
+    // The plugin pushes the remote URL when BitBang connects, so the navbar
+    // reflects it live.
+    self.onDataUpdaterPluginMessage = function (plugin, data) {
+        if (plugin === "bitbang" && data && data.url !== undefined) {
+            self.remoteUrl(data.url);
+        }
+    };
+}
+
+OCTOPRINT_VIEWMODELS.push({
+    construct: BitBangViewModel,
+    dependencies: ["settingsViewModel"],
+    elements: ["#navbar_plugin_bitbang", "#settings_plugin_bitbang"]
+});

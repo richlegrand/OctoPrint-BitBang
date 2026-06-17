@@ -1,29 +1,4 @@
-<a id="bitbang_navbar_link" href="javascript:void(0)" title="BitBang remote access" style="display:none" onclick="
-    fetch('/api/settings')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var url = data.plugins && data.plugins.bitbang && data.plugins.bitbang.url;
-            if (url) {
-                prompt('BitBang URL (Ctrl+C to copy):', url);
-            } else {
-                alert('BitBang URL not available yet');
-            }
-        })
-        .catch(function() { alert('Could not load settings'); });
-">
-    <i id="bitbang_navbar_icon" class="fas fa-link"></i> <span class="hidden-phone">BitBang</span>
+<a href="javascript:void(0)" title="BitBang remote access"
+   data-bind="visible: settings.settings.plugins.bitbang.enabled, click: showUrl">
+    <i class="fas fa-link"></i> <span class="hidden-phone">BitBang</span>
 </a>
-<script>
-(function () {
-    fetch('/api/settings')
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            var enabled = data.plugins && data.plugins.bitbang && data.plugins.bitbang.enabled;
-            if (enabled) {
-                var link = document.getElementById('bitbang_navbar_link');
-                if (link) link.style.display = '';
-            }
-        })
-        .catch(function () {});
-})();
-</script>

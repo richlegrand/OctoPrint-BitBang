@@ -4,8 +4,15 @@ Remote OctoPrint access with live H.264 video via BitBang WebRTC.
 No account, no subscription, no port forwarding. One shareable link.
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
 __plugin_name__ = "BitBang"
-__plugin_version__ = "0.2.6"
+try:
+    # Single source of truth: read the version from the installed package
+    # metadata (declared once in pyproject.toml) rather than duplicating it here.
+    __plugin_version__ = version("OctoPrint-BitBang")
+except PackageNotFoundError:  # running from a source checkout, not pip-installed
+    __plugin_version__ = "0.0.0+unknown"
 __plugin_description__ = "Remote OctoPrint access with live H.264 video via BitBang WebRTC. No account, no port forwarding, one shareable link."
 __plugin_url__ = "https://github.com/richlegrand/OctoPrint-BitBang"
 __plugin_author__ = "Rich LeGrand"

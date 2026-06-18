@@ -1,8 +1,12 @@
 #!/bin/bash
-# Bump the version number in all files that contain it.
+# Bump the plugin version.
+#
+# The version lives only in pyproject.toml; the plugin reads
+# __plugin_version__ from the installed package metadata at runtime, so there's
+# nothing to update in octoprint_bitbang/__init__.py.
 #
 # Usage:
-#   ./version.sh 0.2.0
+#   ./version.sh 0.2.7
 
 set -e
 
@@ -15,12 +19,7 @@ fi
 NEW="$1"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Update pyproject.toml
 sed -i "s/^version = \".*\"/version = \"$NEW\"/" "$DIR/pyproject.toml"
-
-# Update octoprint_bitbang/__init__.py (OctoPrint reads __plugin_version__)
-sed -i "s/^__plugin_version__ = \".*\"/__plugin_version__ = \"$NEW\"/" "$DIR/octoprint_bitbang/__init__.py"
 
 echo "Version bumped to $NEW"
 grep '^version' "$DIR/pyproject.toml"
-grep '^__plugin_version__' "$DIR/octoprint_bitbang/__init__.py"

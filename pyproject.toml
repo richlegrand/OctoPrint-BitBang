@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "OctoPrint-BitBang"
-version = "0.2.6"
+version = "0.2.7"
 description = "Remote OctoPrint access with live H.264 video via BitBang WebRTC"
 readme = "README.md"
 license = "MIT"

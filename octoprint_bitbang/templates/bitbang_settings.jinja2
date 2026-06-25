@@ -14,8 +14,40 @@
             <div class="controls">
                 <input type="text" class="input-medium"
                        data-bind="value: settings.settings.plugins.bitbang.pin"
-                       placeholder="Empty to disable">
-                <span class="help-inline">Optional PIN to protect remote access</span>
+                       placeholder="At least 4 characters">
+                <span class="help-inline">
+                    Protects remote access. At least 4 characters. Leave empty
+                    only if you tick &ldquo;allow no PIN&rdquo; below &mdash;
+                    otherwise remote access stays disabled.
+                </span>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <div class="controls">
+                <label class="checkbox">
+                    <input type="checkbox"
+                           data-bind="checked: settings.settings.plugins.bitbang.allow_no_pin">
+                    Allow remote access without a PIN (not recommended)
+                </label>
+                <span class="help-block muted">
+                    Anyone who has the share link could control this printer.
+                </span>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <div class="controls">
+                <label class="checkbox">
+                    <input type="checkbox"
+                           data-bind="checked: settings.settings.plugins.bitbang.forward_client_ip">
+                    Forward client IP to OctoPrint
+                </label>
+                <span class="help-block muted">
+                    Enable only if you use OctoPrint's &ldquo;autologin from local
+                    network&rdquo;. OctoPrint will then show an &ldquo;external
+                    access&rdquo; banner (expected).
+                </span>
             </div>
         </div>
 

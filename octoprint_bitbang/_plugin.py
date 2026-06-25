@@ -47,6 +47,12 @@ except ImportError as e:
     )
 
 
+# A PIN must be empty (remote access then gated/off) or at least this many
+# characters. Mirrored by the wizard/settings JS; enforced server-side in
+# on_settings_save as the authoritative backstop.
+MIN_PIN_LENGTH = 4
+
+
 class BitBangPlugin(
     octoprint.plugin.StartupPlugin,
     octoprint.plugin.ShutdownPlugin,
@@ -55,12 +61,14 @@ class BitBangPlugin(
     octoprint.plugin.AssetPlugin,
     octoprint.plugin.BlueprintPlugin,
     octoprint.plugin.WebcamProviderPlugin,
+    octoprint.plugin.WizardPlugin,
 ):
     def __init__(self):
         super().__init__()
         self._adapter = None
         self._thread = None
         self._local_pcs = set()  # track local WebRTC peer connections
+        self._running = False  # whether the remote-access proxy is live
 
     def on_shutdown(self):
         # Release the camera cleanly when OctoPrint shuts down via its own
@@ -93,7 +101,29 @@ class BitBangPlugin(
         if not self._settings.get_boolean(["enabled"]):
             self._logger.info("BitBang disabled in settings")
             return
+        if not self._remote_access_allowed():
+            self._logger.warning(
+                "BitBang: remote access NOT started — no PIN is set. Set a PIN "
+                "in the BitBang settings (or, advanced, explicitly allow running "
+                "without one) to enable remote access."
+            )
+            return
         self._start_bitbang()
+
+    def _remote_access_allowed(self):
+        """Secure-by-default gate. The public tunnel is only exposed when a
+        PIN protects it, or the user has explicitly opted into running without
+        one. An empty PIN with no opt-in means remote access stays OFF — this
+        is the enforcement behind the setup wizard (which merely prompts).
+
+        Without this, anyone holding the share URL reaches OctoPrint with no
+        BitBang-layer auth; for users who enabled OctoPrint's autologinLocal
+        that is a full remote takeover (see the X-Forwarded-For handling in
+        the Go proxy)."""
+        pin = (self._settings.get(["pin"]) or "").strip()
+        if pin:
+            return True
+        return self._settings.get_boolean(["allow_no_pin"])
 
     def _probe_picamera2_sensor(self):
         # Cache before the adapter opens the camera — picamera2 can't be
@@ -209,6 +239,7 @@ class BitBangPlugin(
         # pion) owns the transport under our shared identity, and our camera
         # track is fed into a video PeerConnection over a socketpair relay.
         self._start_video_bridge()
+        self._running = True
 
     def _run_aiortc_loop(self):
         """Bare asyncio loop for aiortc. Replaces the adapter's own bitbang
@@ -312,6 +343,13 @@ class BitBangPlugin(
             pin = (self._settings.get(["pin"]) or "").strip()
             if pin:
                 args += ["-pin", pin]
+            # Off by default. Forwarding the real client IP makes OctoPrint
+            # see external requests as external (needed if you use OctoPrint's
+            # autologinLocal — otherwise a remote visitor appears as localhost
+            # and gets auto-logged-in). It also makes OctoPrint show its
+            # "external access" banner, so it's opt-in. See README → Security.
+            if self._settings.get_boolean(["forward_client_ip"]):
+                args += ["-forward-client-ip"]
             proc = subprocess.Popen(
                 args, pass_fds=(child.fileno(),), stdout=logf, stderr=subprocess.STDOUT)
             child.close()
@@ -333,6 +371,39 @@ class BitBangPlugin(
                 f"— see {log_path}")
             time.sleep(backoff)
             backoff = min(backoff * 2, 30)
+
+    def _stop_bitbang(self):
+        """Tear down the remote-access proxy (Go subprocess supervisor +
+        aiortc loop + camera). Best-effort; each step is independently
+        guarded so a failure in one doesn't strand the others."""
+        self._running = False
+        # Tell the supervisor not to respawn, then kill the current proxy.
+        self._go_stop = True
+        proc = getattr(self, "_go_proc", None)
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        # Release the camera.
+        try:
+            player = getattr(self._adapter, "player", None) if self._adapter else None
+            if player is not None:
+                player.stop()
+        except Exception as e:
+            self._logger.warning(f"BitBang: error stopping camera: {e}")
+        # Stop the aiortc event loop so its thread can exit.
+        try:
+            loop = getattr(self._adapter, "_loop", None) if self._adapter else None
+            if loop is not None and loop.is_running():
+                loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
+        self._adapter = None
+        # Clear the persisted URL so the navbar doesn't show a dead link.
+        self._settings.set(["url"], "")
+        self._settings.save()
+        self._plugin_manager.send_plugin_message(self._identifier, {"url": ""})
 
     # -- Local WebRTC video signaling --
 
@@ -756,6 +827,13 @@ class BitBangPlugin(
         return {
             "enabled": True,
             "pin": "",
+            # Explicit opt-in to expose remote access with NO PIN. Default
+            # False so a fresh install is gated until the wizard runs.
+            "allow_no_pin": False,
+            # Opt-in: forward the real client IP to OctoPrint as X-Forwarded-For.
+            # Off by default (no proxied-app breakage, no external-access
+            # banner). Enable if you use OctoPrint's autologinLocal. See README.
+            "forward_client_ip": False,
             "url": "",
             "camera_device": "",
             "camera_resolution": "640x480",
@@ -765,15 +843,101 @@ class BitBangPlugin(
             "signaling_server": "bitba.ng",
         }
 
+    def on_settings_save(self, data):
+        # Server-side PIN-policy backstop. The wizard/settings JS validates
+        # too, but this is authoritative: a non-empty PIN below the minimum
+        # length is rejected (the prior value is kept) rather than persisted.
+        if data.get("pin"):
+            pin = str(data["pin"]).strip()
+            if 0 < len(pin) < MIN_PIN_LENGTH:
+                self._logger.warning(
+                    "BitBang: rejected PIN shorter than %d characters",
+                    MIN_PIN_LENGTH,
+                )
+                data["pin"] = self._settings.get(["pin"])
+            else:
+                data["pin"] = pin
+
+        # Snapshot gate-relevant state, save, then reconcile if it changed so
+        # the wizard's "set a PIN" takes effect without an OctoPrint restart.
+        before = self._gate_state()
+        octoprint.plugin.SettingsPlugin.on_settings_save(self, data)
+        if self._gate_state() != before:
+            self._reconcile_remote_access()
+
+    def _gate_state(self):
+        """The tuple of settings that determines whether/how the proxy runs.
+        forward_client_ip is included so toggling it restarts the Go proxy
+        (which reads the flag at spawn) without a full OctoPrint restart."""
+        return (
+            self._settings.get_boolean(["enabled"]),
+            (self._settings.get(["pin"]) or "").strip(),
+            self._settings.get_boolean(["allow_no_pin"]),
+            self._settings.get_boolean(["forward_client_ip"]),
+        )
+
+    def _reconcile_remote_access(self):
+        """Bring the running proxy in line with current settings. Best-effort
+        and defensive: on any failure the user can still restart OctoPrint to
+        pick up the change (the prior behavior)."""
+        if _VIDEO_IMPORT_ERROR:
+            return  # video stack unavailable; nothing to start/stop
+        try:
+            should_run = self._settings.get_boolean(["enabled"]) and self._remote_access_allowed()
+            if should_run and not self._running:
+                self._logger.info("BitBang: remote access now permitted — starting")
+                self._start_bitbang()
+            elif not should_run and self._running:
+                self._logger.info("BitBang: remote access no longer permitted — stopping")
+                self._stop_bitbang()
+            elif should_run and self._running:
+                # Still running, but the PIN may have changed. The Go proxy
+                # reads -pin fresh on each spawn, so bouncing the subprocess
+                # (the supervisor respawns it) applies the new PIN.
+                self._logger.info("BitBang: PIN/config changed — restarting proxy")
+                self._restart_go_proxy()
+        except Exception as e:
+            self._logger.warning(
+                "BitBang: live reconcile failed (%s); restart OctoPrint to apply", e
+            )
+
+    def _restart_go_proxy(self):
+        """Bounce just the Go subprocess; the supervisor loop respawns it with
+        the current -pin. Falls back to a full restart if no proc is tracked."""
+        proc = getattr(self, "_go_proc", None)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+        else:
+            self._stop_bitbang()
+            if self._settings.get_boolean(["enabled"]) and self._remote_access_allowed():
+                self._start_bitbang()
+
     def get_template_configs(self):
         return [
             {"type": "settings", "custom_bindings": True},
             {"type": "navbar", "custom_bindings": True},
+            {"type": "wizard", "name": "BitBang", "template": "bitbang_wizard.jinja2"},
             # Render the live view as a proper webcam provider template so
             # OctoPrint shows it only when "BitBang Camera" is the selected
             # webcam -- no DOM-replacing the classic webcam.
             {"type": "webcam", "name": "BitBang Camera", "template": "bitbang_webcam.jinja2"},
         ]
+
+    # -- Setup wizard (secure-by-default PIN prompt) --
+
+    def is_wizard_required(self):
+        # Show the wizard whenever remote access would be enabled but is
+        # currently ungated (no PIN, no explicit opt-out). Covers fresh
+        # installs and existing no-PIN users on upgrade.
+        return self._settings.get_boolean(["enabled"]) and not self._remote_access_allowed()
+
+    def get_wizard_version(self):
+        # Bump to re-show the wizard to users who already cleared an older
+        # version (e.g. if the PIN policy changes again).
+        return 1
+
+    def get_wizard_details(self):
+        return {"required": self.is_wizard_required()}
 
     def get_template_vars(self):
         return {"plugin_version": __plugin_version__}

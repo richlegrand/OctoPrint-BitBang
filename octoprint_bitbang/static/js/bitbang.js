@@ -399,3 +399,55 @@ OCTOPRINT_VIEWMODELS.push({
     dependencies: ["settingsViewModel"],
     elements: ["#navbar_plugin_bitbang", "#settings_plugin_bitbang"]
 });
+
+/*
+ * Setup-wizard viewmodel. The wizard fields bind directly to the shared
+ * settings observables, so OctoPrint persists them on Finish (which then
+ * runs the server-side PIN-length backstop in on_settings_save). This VM
+ * only supplies live validation feedback for the PIN field.
+ */
+function BitBangWizardViewModel(parameters) {
+    var self = this;
+    self.settings = parameters[0];
+
+    function bb() {
+        var plugins = self.settings.settings.plugins;
+        return plugins && plugins.bitbang ? plugins.bitbang : null;
+    }
+
+    function pinOk() {
+        var b = bb();
+        if (!b) return true;
+        return b.allow_no_pin() || (b.pin() || "").trim().length >= 4;
+    }
+
+    self.pinTooShort = ko.pureComputed(function () {
+        var b = bb();
+        if (!b) return false;
+        var pin = (b.pin() || "").trim();
+        return pin.length > 0 && pin.length < 4;
+    });
+
+    // Set once the user tries to finish without a usable PIN. Drives the
+    // blocking message; clears reactively once they set a valid PIN or
+    // tick the no-PIN opt-out.
+    self.finishAttempted = ko.observable(false);
+    self.finishBlocked = ko.pureComputed(function () {
+        return self.finishAttempted() && !pinOk();
+    });
+
+    // Veto the wizard's Finish button unless a valid PIN is set (or the user
+    // explicitly opted out). Returning false keeps the dialog open — see
+    // OctoPrint wizard.js onBeforeWizardFinish.
+    self.onBeforeWizardFinish = function () {
+        if (pinOk()) return true;
+        self.finishAttempted(true);
+        return false;
+    };
+}
+
+OCTOPRINT_VIEWMODELS.push({
+    construct: BitBangWizardViewModel,
+    dependencies: ["settingsViewModel"],
+    elements: ["#wizard_plugin_bitbang"]
+});

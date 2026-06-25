@@ -1,0 +1,47 @@
+<div id="wizard_plugin_bitbang">
+    <h3>Secure your BitBang remote access</h3>
+    <p>
+        BitBang gives this OctoPrint a private link you can use to reach it from
+        anywhere. Protect that link with a PIN so only you can connect &mdash; we
+        recommend at least {{ 4 }} characters.
+    </p>
+
+    <form class="form-horizontal">
+        <div class="control-group">
+            <label class="control-label">PIN</label>
+            <div class="controls">
+                <input type="text" class="input-medium"
+                       data-bind="value: settings.settings.plugins.bitbang.pin, valueUpdate: 'afterkeydown'"
+                       placeholder="At least 4 characters">
+                <span class="help-inline" style="color: #b94a48;"
+                      data-bind="visible: pinTooShort">
+                    PIN must be at least 4 characters.
+                </span>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <div class="controls">
+                <label class="checkbox">
+                    <input type="checkbox"
+                           data-bind="checked: settings.settings.plugins.bitbang.allow_no_pin">
+                    Advanced: run without a PIN
+                </label>
+                <span class="help-block muted">
+                    Not recommended &mdash; anyone who has the link could control
+                    this printer.
+                </span>
+            </div>
+        </div>
+    </form>
+
+    <p class="muted">
+        Until you set a PIN (or tick the box above), BitBang remote access stays
+        disabled.
+    </p>
+
+    <div class="alert alert-error" data-bind="visible: finishBlocked" style="display: none;">
+        Set a PIN of at least 4 characters, or tick &ldquo;run without a
+        PIN&rdquo; above, before finishing.
+    </div>
+</div>

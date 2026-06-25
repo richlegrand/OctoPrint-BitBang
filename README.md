@@ -85,12 +85,33 @@ All settings live in **Settings → BitBang**:
 | Setting | Effect |
 |---|---|
 | Enabled | Toggle BitBang remote access |
-| PIN | Optional 4+ digit PIN prompt on the remote URL |
+| PIN | **Required by default.** At least 4 characters; prompted on the remote URL. Remote access stays **off** until a PIN is set (or "Allow no PIN" is ticked). |
+| Allow no PIN | Expose remote access with no PIN (not recommended — anyone with the link can control the printer) |
+| Forward client IP | Send the real visitor IP to OctoPrint as `X-Forwarded-For`. Off by default; see **Security** below. |
 | Camera | Auto-detect, or select from dropdown list |
 | Resolution | VGA → HD (depending on what selected camera supports) |
 | Flip horizontal / vertical | Flip video if necessary |
 
-All settings take effect on OctoPrint restart. Full-screen button and brightness slider are overlaid on the video window (Control tab) and update immediately.
+Changes to the PIN and Enabled settings take effect immediately (no OctoPrint restart). Full-screen button and brightness slider are overlaid on the video window (Control tab) and update immediately.
+
+### Set a PIN (required)
+
+BitBang exposes a public link to your printer, so it is protected by a PIN. On
+first install a **setup wizard** prompts you to choose one — remote access does
+not start until you do. You can change it any time under **Settings → BitBang**.
+
+### Security
+
+- **PIN is mandatory by default.** With no PIN (and "Allow no PIN" unticked),
+  the public tunnel is not started at all — fail-closed.
+- **OctoPrint `autologinLocal`:** BitBang's proxy connects to OctoPrint from
+  `localhost`. If you have enabled OctoPrint's **Access Control → autologin from
+  local network** (`accessControl.autologinLocal`), a remote visitor would
+  appear local and be auto-logged-in. If you use that feature, either disable
+  it, or enable **Forward client IP** above so OctoPrint sees the real remote
+  address (note: OctoPrint will then show its "external access detected" banner,
+  which is expected). With `autologinLocal` off (the default) this does not
+  apply and the option can stay off.
 
 ## How it works
 

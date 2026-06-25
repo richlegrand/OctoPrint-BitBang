@@ -343,13 +343,6 @@ class BitBangPlugin(
             pin = (self._settings.get(["pin"]) or "").strip()
             if pin:
                 args += ["-pin", pin]
-            # Off by default. Forwarding the real client IP makes OctoPrint
-            # see external requests as external (needed if you use OctoPrint's
-            # autologinLocal — otherwise a remote visitor appears as localhost
-            # and gets auto-logged-in). It also makes OctoPrint show its
-            # "external access" banner, so it's opt-in. See README → Security.
-            if self._settings.get_boolean(["forward_client_ip"]):
-                args += ["-forward-client-ip"]
             proc = subprocess.Popen(
                 args, pass_fds=(child.fileno(),), stdout=logf, stderr=subprocess.STDOUT)
             child.close()
@@ -830,10 +823,6 @@ class BitBangPlugin(
             # Explicit opt-in to expose remote access with NO PIN. Default
             # False so a fresh install is gated until the wizard runs.
             "allow_no_pin": False,
-            # Opt-in: forward the real client IP to OctoPrint as X-Forwarded-For.
-            # Off by default (no proxied-app breakage, no external-access
-            # banner). Enable if you use OctoPrint's autologinLocal. See README.
-            "forward_client_ip": False,
             "url": "",
             "camera_device": "",
             "camera_resolution": "640x480",
@@ -866,14 +855,11 @@ class BitBangPlugin(
             self._reconcile_remote_access()
 
     def _gate_state(self):
-        """The tuple of settings that determines whether/how the proxy runs.
-        forward_client_ip is included so toggling it restarts the Go proxy
-        (which reads the flag at spawn) without a full OctoPrint restart."""
+        """The tuple of settings that determines whether/how the proxy runs."""
         return (
             self._settings.get_boolean(["enabled"]),
             (self._settings.get(["pin"]) or "").strip(),
             self._settings.get_boolean(["allow_no_pin"]),
-            self._settings.get_boolean(["forward_client_ip"]),
         )
 
     def _reconcile_remote_access(self):

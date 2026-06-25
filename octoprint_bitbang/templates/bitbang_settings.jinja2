@@ -37,21 +37,6 @@
         </div>
 
         <div class="control-group">
-            <div class="controls">
-                <label class="checkbox">
-                    <input type="checkbox"
-                           data-bind="checked: settings.settings.plugins.bitbang.forward_client_ip">
-                    Forward client IP to OctoPrint
-                </label>
-                <span class="help-block muted">
-                    Enable only if you use OctoPrint's &ldquo;autologin from local
-                    network&rdquo;. OctoPrint will then show an &ldquo;external
-                    access&rdquo; banner (expected).
-                </span>
-            </div>
-        </div>
-
-        <div class="control-group">
             <label class="control-label">Remote URL</label>
             <div class="controls">
                 <span data-bind="visible: settings.settings.plugins.bitbang.url()">

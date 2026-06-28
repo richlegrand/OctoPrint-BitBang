@@ -372,39 +372,6 @@ class BitBangPlugin(
             time.sleep(backoff)
             backoff = min(backoff * 2, 30)
 
-    def _stop_bitbang(self):
-        """Tear down the remote-access proxy (Go subprocess supervisor +
-        aiortc loop + camera). Best-effort; each step is independently
-        guarded so a failure in one doesn't strand the others."""
-        self._running = False
-        # Tell the supervisor not to respawn, then kill the current proxy.
-        self._go_stop = True
-        proc = getattr(self, "_go_proc", None)
-        if proc is not None and proc.poll() is None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-        # Release the camera.
-        try:
-            player = getattr(self._adapter, "player", None) if self._adapter else None
-            if player is not None:
-                player.stop()
-        except Exception as e:
-            self._logger.warning(f"BitBang: error stopping camera: {e}")
-        # Stop the aiortc event loop so its thread can exit.
-        try:
-            loop = getattr(self._adapter, "_loop", None) if self._adapter else None
-            if loop is not None and loop.is_running():
-                loop.call_soon_threadsafe(loop.stop)
-        except Exception:
-            pass
-        self._adapter = None
-        # Clear the persisted URL so the navbar doesn't show a dead link.
-        self._settings.set(["url"], "")
-        self._settings.save()
-        self._plugin_manager.send_plugin_message(self._identifier, {"url": ""})
-
     # -- Local WebRTC video signaling --
 
     @octoprint.plugin.BlueprintPlugin.route("/ice-servers", methods=["GET"])
@@ -854,8 +821,7 @@ class BitBangPlugin(
             else:
                 data["pin"] = pin
 
-        # Snapshot gate-relevant state, save, then reconcile if it changed so
-        # the wizard's "set a PIN" takes effect without an OctoPrint restart.
+        # Snapshot gate-relevant state, save, then reconcile if it changed.
         before = self._gate_state()
         octoprint.plugin.SettingsPlugin.on_settings_save(self, data)
         if self._gate_state() != before:
@@ -870,9 +836,15 @@ class BitBangPlugin(
         )
 
     def _reconcile_remote_access(self):
-        """Bring the running proxy in line with current settings. Best-effort
-        and defensive: on any failure the user can still restart OctoPrint to
-        pick up the change (the prior behavior)."""
+        """React to a gate-relevant settings change.
+
+        Starting remote access when it wasn't running (e.g. the wizard just set
+        the first PIN) is done live — nothing is connected yet, so there's no
+        tunnel to drop. Any change to an ALREADY-running proxy (PIN change,
+        disable) is NOT applied live: bouncing the proxy would drop active
+        connections, including the very save request that triggered this if it
+        arrived over the tunnel (the request would hang). Those changes take
+        effect on the next OctoPrint restart; we tell the user."""
         if _VIDEO_IMPORT_ERROR:
             return  # video stack unavailable; nothing to start/stop
         try:
@@ -880,30 +852,16 @@ class BitBangPlugin(
             if should_run and not self._running:
                 self._logger.info("BitBang: remote access now permitted — starting")
                 self._start_bitbang()
-            elif not should_run and self._running:
-                self._logger.info("BitBang: remote access no longer permitted — stopping")
-                self._stop_bitbang()
-            elif should_run and self._running:
-                # Still running, but the PIN may have changed. The Go proxy
-                # reads -pin fresh on each spawn, so bouncing the subprocess
-                # (the supervisor respawns it) applies the new PIN.
-                self._logger.info("BitBang: PIN/config changed — restarting proxy")
-                self._restart_go_proxy()
+            elif self._running:
+                self._logger.info(
+                    "BitBang: change will take effect on the next OctoPrint restart"
+                )
+                self._plugin_manager.send_plugin_message(
+                    self._identifier,
+                    {"restart_needed": "BitBang: restart OctoPrint to apply this change."},
+                )
         except Exception as e:
-            self._logger.warning(
-                "BitBang: live reconcile failed (%s); restart OctoPrint to apply", e
-            )
-
-    def _restart_go_proxy(self):
-        """Bounce just the Go subprocess; the supervisor loop respawns it with
-        the current -pin. Falls back to a full restart if no proc is tracked."""
-        proc = getattr(self, "_go_proc", None)
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-        else:
-            self._stop_bitbang()
-            if self._settings.get_boolean(["enabled"]) and self._remote_access_allowed():
-                self._start_bitbang()
+            self._logger.warning("BitBang: reconcile failed (%s)", e)
 
     def get_template_configs(self):
         return [

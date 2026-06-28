@@ -386,10 +386,20 @@ function BitBangViewModel(parameters) {
     };
 
     // The plugin pushes the remote URL when BitBang connects, so the navbar
-    // reflects it live.
+    // reflects it live. It also pushes a restart-needed notice when a setting
+    // change (e.g. a new PIN) can only be applied on the next restart.
     self.onDataUpdaterPluginMessage = function (plugin, data) {
-        if (plugin === "bitbang" && data && data.url !== undefined) {
+        if (plugin !== "bitbang" || !data) return;
+        if (data.url !== undefined) {
             self.remoteUrl(data.url);
+        }
+        if (data.restart_needed) {
+            new PNotify({
+                title: "BitBang",
+                text: data.restart_needed,
+                type: "warning",
+                hide: false
+            });
         }
     };
 }

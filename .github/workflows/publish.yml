@@ -78,14 +78,21 @@ jobs:
             dist/*
             release.zip
 
-      - name: Publish to PyPI
-        if: github.event_name == 'release'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-
+      # Attach the release.zip FIRST — Plugin Manager installs from this asset
+      # (not PyPI), so it's the critical artifact and must never be blocked by
+      # a downstream step failing.
       - name: Attach release.zip to the GitHub release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: release.zip
+
+      # PyPI is best-effort (Plugin Manager can't install from a bare PyPI
+      # package anyway). continue-on-error so a PyPI hiccup doesn't fail the
+      # release or skip the asset attach above.
+      - name: Publish to PyPI
+        if: github.event_name == 'release'
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

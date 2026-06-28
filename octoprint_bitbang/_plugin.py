@@ -337,7 +337,14 @@ class BitBangPlugin(
             # Go shares our identity (-program) → one URL; -target serves
             # OctoPrint directly on the plain device URL.
             args = [go_bin, "serve", "proxy", "-program", "octoprint",
-                    "-target", f"localhost:{port}", "-v", "-video-fd", str(child.fileno())]
+                    "-target", f"localhost:{port}", "-v", "-video-fd", str(child.fileno()),
+                    # Always stamp the real browser IP as X-Forwarded-For — standard
+                    # reverse-proxy behavior. Without it OctoPrint sees every request
+                    # as coming from localhost, which (with autologinLocal) would
+                    # auto-log-in a remote visitor. OctoPrint shows a one-time,
+                    # per-browser "external access" notice as a result, which is
+                    # accurate (the visitor IS external).
+                    "-forward-client-ip"]
             # The Go proxy owns the data channel + signaling, so it's what must
             # enforce the PIN — passing it to the Python adapter does nothing now.
             pin = (self._settings.get(["pin"]) or "").strip()

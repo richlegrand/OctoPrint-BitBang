@@ -43,13 +43,15 @@ sudo apt install -y libvpx-dev libopus-dev libsrtp2-dev
 
 ### Install the plugin
 
-In OctoPrint, open **Settings → Plugin Manager → Get More**, choose **... from URL**, and paste:
+In OctoPrint, open **Settings → Plugin Manager → Get More**, search for **BitBang**, and click **Install**.
+
+If it doesn't show up yet — Plugin Manager caches its plugin list for up to a day — you can install it right away by choosing **... from URL** instead and pasting:
 
 ```
 https://github.com/richlegrand/OctoPrint-BitBang/releases/latest/download/release.zip
 ```
 
-Once the plugin is accepted into OctoPrint's repository you'll also be able to find it by searching for "BitBang". Prefer the command line? `~/oprint/bin/pip install OctoPrint-BitBang` installs the same package. Either way, don't install from the GitHub source zip — it omits the bundled proxy binaries, so remote access and video won't work.
+Prefer the command line? `~/oprint/bin/pip install OctoPrint-BitBang` installs the same package. Whichever route you take, don't install from the GitHub *source* zip — it omits the bundled proxy binaries, so remote access and video won't work.
 
 ### Set up the camera
 

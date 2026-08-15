@@ -88,7 +88,8 @@ class OctoPrintBitBang(BitBangASGI):
             video_size=opts.get("video_size", "1280x720"),
             framerate=int(opts.get("framerate", 30)),
             bitrate=source.get("bitrate", 4_000_000),
-            brightness=brightness, flip_horizontal=flip_h, flip_vertical=flip_v)
+            brightness=brightness, flip_horizontal=flip_h, flip_vertical=flip_v,
+            logger=self._logger)
         try:
             from .v4l2_h264_source import (
                 V4l2H264Track, device_supports_h264, device_supports_flip,

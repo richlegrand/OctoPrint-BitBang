@@ -22,15 +22,20 @@ output. If a future PyAV gains BSF support this can move in-process.
 """
 
 import asyncio
+import logging
+import os
 import shutil
 import signal
 import subprocess
 import threading
 import time
+from collections import deque
 from fractions import Fraction
 
 import av
 from aiortc import MediaStreamTrack
+
+_log = logging.getLogger(__name__)
 
 # av.Packet timestamps use a monotonic microsecond clock; aiortc only needs
 # monotonically increasing pts in a known time_base.
@@ -39,6 +44,42 @@ _TIME_BASE = Fraction(1, 1_000_000)
 # Full-range BT.709 -- matches the Pi sensor/encoder pipeline at 720p+.
 _VUI_BSF = ("h264_metadata=video_full_range_flag=1:"
             "matrix_coefficients=1:colour_primaries=1:transfer_characteristics=1")
+
+def device_holders(device):
+    """Best-effort list of "pid NAME" strings for processes holding `device`
+    open.
+
+    Reads /proc/*/fd, which is only readable for processes owned by the same
+    user -- that covers the case we care about (another OctoPrint plugin
+    shelling out to v4l2-ctl runs as the OctoPrint user). Root-owned holders
+    such as a systemd-managed streamer stay invisible, so an empty result is
+    not proof that nothing else has the device.
+    """
+    target = os.path.realpath(device)
+    holders = []
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return holders
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        fd_dir = os.path.join("/proc", pid, "fd")
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue  # another user's process, or it exited mid-scan
+        for fd in fds:
+            if os.path.realpath(os.path.join(fd_dir, fd)) != target:
+                continue
+            try:
+                with open(os.path.join("/proc", pid, "comm")) as f:
+                    name = f.read().strip()
+            except OSError:
+                name = "?"
+            holders.append(f"pid {pid} ({name})")
+            break
+    return holders
 
 
 def device_supports_h264(device):
@@ -119,7 +160,9 @@ class V4l2H264Track(MediaStreamTrack):
     A background thread runs `ffmpeg` (capture + VUI fix) and demuxes its output
     with PyAV, pushing each encoded packet onto an asyncio.Queue (dropping the
     oldest on overflow so the live stream never stalls). recv() returns
-    av.Packet, matching PiH264Track's passthrough contract.
+    av.Packet, matching PiH264Track's passthrough contract. If ffmpeg dies the
+    reason is logged (stderr tail plus any other process holding the device) and
+    the track fails; recovery is an OctoPrint restart.
     """
 
     kind = "video"
@@ -127,12 +170,13 @@ class V4l2H264Track(MediaStreamTrack):
     def __init__(self, device, source_is_h264=True, input_format="h264",
                  video_size="1280x720", framerate=30,
                  bitrate=4_000_000, gop=30, brightness=0,
-                 flip_horizontal=False, flip_vertical=False):
+                 flip_horizontal=False, flip_vertical=False, logger=None):
         super().__init__()
         if not shutil.which("ffmpeg"):
             raise RuntimeError("ffmpeg binary not found")
 
         self.device = device
+        self._logger = logger or _log
         # source_is_h264=True  -> device emits H.264; ffmpeg `-c copy` (passthrough).
         # source_is_h264=False -> raw/MJPEG source; ffmpeg `-c:v h264_v4l2m2m`
         #                         (Pi 4 GPU re-encode). Same downstream pipeline.
@@ -156,6 +200,9 @@ class V4l2H264Track(MediaStreamTrack):
         self._proc = None
         self._container = None
         self._started = False
+        # Tail of ffmpeg's stderr, so a failure can say *why* rather than just
+        # going quiet ("Device or resource busy" lands here).
+        self._stderr_tail = deque(maxlen=20)
 
         self._brightness_range = self._query_brightness_range()
         if self._brightness_range:
@@ -249,32 +296,89 @@ class V4l2H264Track(MediaStreamTrack):
         cmd += ["-bsf:v", bsf, "-flush_packets", "1", "-f", "h264", "pipe:1"]
         return cmd
 
-    def _capture_loop(self):
+    def _drain_stderr(self, pipe):
+        """Keep the tail of ffmpeg's stderr. Has to run in its own thread: an
+        unread stderr pipe fills up and blocks ffmpeg."""
         try:
-            self._proc = subprocess.Popen(
-                self._ffmpeg_cmd(), stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, bufsize=0)
-            self._container = av.open(self._proc.stdout, format="h264")
-            stream = self._container.streams.video[0]
-            base = None
-            for packet in self._container.demux(stream):
-                if self._stop.is_set():
-                    break
-                if not packet.size:
-                    continue
-                data = bytes(packet)
-                now = time.monotonic()
-                if base is None:
-                    base = now
-                pkt = av.Packet(data)
-                pkt.pts = int((now - base) * 1_000_000)
-                pkt.dts = pkt.pts
-                pkt.time_base = _TIME_BASE
-                pkt.is_keyframe = bool(packet.is_keyframe)
-                self._loop.call_soon_threadsafe(self._enqueue, pkt)
-        except Exception as e:  # noqa: BLE001 - surface to recv()
-            if not self._stop.is_set():
-                self._loop.call_soon_threadsafe(self._fail, e)
+            for line in iter(pipe.readline, b""):
+                text = line.decode("utf-8", "replace").strip()
+                if text:
+                    self._stderr_tail.append(text)
+        except Exception:
+            pass
+        finally:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+    def _run_once(self):
+        """Run one ffmpeg capture until it ends. Returns None if we stopped it
+        on purpose, otherwise a short string describing why it ended."""
+        self._stderr_tail.clear()
+        self._configure_encoder()
+        self._proc = subprocess.Popen(
+            self._ffmpeg_cmd(), stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, bufsize=0)
+        threading.Thread(target=self._drain_stderr, args=(self._proc.stderr,),
+                         name="v4l2-h264-err", daemon=True).start()
+        self._container = av.open(self._proc.stdout, format="h264")
+        stream = self._container.streams.video[0]
+        base = None
+        for packet in self._container.demux(stream):
+            if self._stop.is_set():
+                return None
+            if not packet.size:
+                continue
+            data = bytes(packet)
+            now = time.monotonic()
+            if base is None:
+                base = now
+            pkt = av.Packet(data)
+            pkt.pts = int((now - base) * 1_000_000)
+            pkt.dts = pkt.pts
+            pkt.time_base = _TIME_BASE
+            pkt.is_keyframe = bool(packet.is_keyframe)
+            self._loop.call_soon_threadsafe(self._enqueue, pkt)
+        # Demux ran dry, i.e. ffmpeg exited on its own. Previously this ended
+        # the thread silently and the video just stopped with nothing logged.
+        return f"ffmpeg exited (rc={self._proc.poll()})"
+
+    def _log_failure(self, reason, ran_seconds):
+        self._logger.warning(
+            f"BitBang: capture on {self.device} stopped after "
+            f"{ran_seconds:.1f}s: {reason}")
+        for line in self._stderr_tail:
+            self._logger.warning(f"BitBang:   ffmpeg: {line}")
+        # Our own ffmpeg is already reaped by now, so anything still holding the
+        # device is someone else -- usually what caused the failure.
+        holders = device_holders(self.device)
+        if holders:
+            self._logger.warning(
+                f"BitBang:   {self.device} is held open by "
+                f"{', '.join(holders)} -- another plugin or service is using "
+                f"the camera")
+
+    def _capture_loop(self):
+        """Run the capture, and report why it ended. A dead capture stays dead
+        (the track fails and the user restarts OctoPrint); the point here is
+        that the log says what happened instead of going silent."""
+        started = time.monotonic()
+        try:
+            reason = self._run_once()
+        except Exception as e:  # noqa: BLE001 - reported, then surfaced to recv()
+            reason = str(e) or e.__class__.__name__
+        finally:
+            self._close_proc()
+        if self._stop.is_set() or reason is None:
+            return
+        self._log_failure(reason, time.monotonic() - started)
+        self._logger.error(
+            f"BitBang: no more video from {self.device} -- restart OctoPrint "
+            f"once the camera is free")
+        self._loop.call_soon_threadsafe(
+            self._fail,
+            RuntimeError(f"V4L2 capture on {self.device} failed: {reason}"))
 
     def _enqueue(self, pkt):
         if self._queue.full():
@@ -317,9 +421,9 @@ class V4l2H264Track(MediaStreamTrack):
         # MediaPlayer-shaped interface so the adapter treats us like the others.
         return self
 
-    def stop(self):
-        super().stop()
-        self._stop.set()
+    def _close_proc(self):
+        """Reap the ffmpeg child and close the demuxer. Used both by stop() and
+        between restart attempts, so a retry never races the previous run."""
         proc = self._proc
         if proc is not None and proc.poll() is None:
             # Shut ffmpeg down *gracefully* first: SIGINT makes it issue
@@ -342,3 +446,9 @@ class V4l2H264Track(MediaStreamTrack):
                 self._container.close()
         except Exception:
             pass
+        self._container = None
+
+    def stop(self):
+        super().stop()
+        self._stop.set()
+        self._close_proc()

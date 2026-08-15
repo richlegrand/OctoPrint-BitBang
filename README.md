@@ -24,13 +24,27 @@ This is part of the [BitBang project](https://github.com/richlegrand/bitbang).
 
 ### Prerequisites
 
-These steps are outside the plugin — do them first.
+These steps are outside the plugin -- do them first.
 
-**Free the camera** from OctoPi's default streamer:
+**Free the camera** from whatever streamer your image ships. On OctoPi:
 
 ```bash
 sudo systemctl disable --now webcamd ffmpeg_hls camera-streamer
 ```
+
+DietPi runs `mjpg-streamer` instead:
+
+```bash
+sudo systemctl disable --now mjpg-streamer
+```
+
+**Non-OctoPi Linux** (DietPi, plain Debian, Ubuntu) usually has no `v4l-utils` package, which OctoPi preinstalls. BitBang shells out to `v4l2-ctl` to enumerate cameras and their resolutions, so without it the camera dropdown in **Settings → BitBang** comes up empty and the hardware H.264 paths are skipped:
+
+```bash
+sudo apt install -y v4l-utils
+```
+
+Check `ffmpeg` is present too (`ffmpeg -version`); OctoPi ships it for timelapse rendering, other images may not. Without it BitBang falls back to software encoding.
 
 **32-bit Raspberry Pi OS** (`armv7l`, the standard OctoPi image) also needs `aiortc` and `pylibsrtp` rebuilt once, because its [piwheels](https://www.piwheels.org/) wheels link newer system libraries than Bookworm ships:
 

@@ -13,19 +13,21 @@ works without a Go toolchain. CI builds bitbang-cli main and sets it.
 import os
 import re
 import subprocess
+import tempfile
 
 import pytest
 
 BIN = os.environ.get('BITBANG_BIN')
 pytestmark = pytest.mark.skipif(not BIN, reason='BITBANG_BIN not set')
 
-# Every flag _supervise_go passes. Keep in step with the argv there.
+# Every flag _supervise_go passes that is documented in --help. Keep in step
+# with the argv there. -video-fd is deliberately absent: it is internal
+# plumbing, hidden from help, and covered by the full-argv parse test below --
+# which is the stronger check anyway.
 PROXY_FLAGS = [
     '-program',
-    '-target',
     '-v',
-    '-video-fd',
-    '-forward-client-ip',
+    '-proxy-client-ip',
     '-pin',
 ]
 
@@ -51,16 +53,49 @@ def test_serve_proxy_still_accepts(flag):
 
 def test_the_full_argv_is_accepted():
     """Flags present in help is not the same as the combination parsing.
-    -help exits before serving, so this is a parse check, not a run."""
-    r = subprocess.run(
-        [BIN, 'serve', 'proxy',
+
+    And --help is not enough on its own: it exits inside flag parsing,
+    before the positional grammar is read at all, so `serve proxy
+    <target>` -- where the target now lives -- goes unchecked. `serve
+    proxy frobnicate --help` exits 0.
+
+    So run the real argv instead. The CLI exits 2 when it rejects an
+    argument, flag or positional, and something other than 2 once it is
+    past parsing and into starting up. -video-fd 3 pointed at /dev/null
+    is what makes that quick: the fd is not a socket, so it gets far
+    enough to prove the argv parsed and then stops on its own.
+    """
+    rc, out = _run_argv('localhost:5000')
+    assert rc != 2, f'the CLI rejected the argv the plugin builds:\n{out}'
+    assert 'is not something to serve' not in out, out
+
+
+def test_a_bogus_positional_is_still_caught():
+    """The guard on the guard. If the check above ever stops running the
+    grammar -- back to --help, say -- this is what notices, because a
+    word the CLI cannot possibly accept has to come back as a rejection.
+    """
+    rc, out = _run_argv('localhost:5000', 'frobnicate')
+    assert rc == 2, f'a bogus positional was accepted (rc={rc}):\n{out}'
+
+
+def _run_argv(*positionals):
+    """Run the plugin's argv with extra positionals, returning (rc, output).
+
+    A None rc means it was still running at the timeout, which counts as
+    accepted -- the CLI rejects argv long before it gets that far.
+    """
+    p = subprocess.Popen(
+        [BIN, 'serve', 'proxy', *positionals,
          '-program', 'octoprint',
-         '-target', 'localhost:5000',
-         '-v', '-video-fd', '3', '-forward-client-ip',
-         '-pin', '1234',
-         '-help'],
-        capture_output=True, text=True, timeout=30,
-    )
-    combined = r.stdout + r.stderr
-    for bad in ('flag provided but not defined', 'unknown subcommand'):
-        assert bad not in combined, f'{bad}:\n{combined}'
+         '-v', '-video-fd', '3', '-proxy-client-ip',
+         '-pin', '1234', '-ephemeral'],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True,
+        pass_fds=(), env=dict(os.environ, HOME=tempfile.mkdtemp()))
+    try:
+        out = p.communicate(timeout=20)[0]
+        return p.returncode, out
+    except subprocess.TimeoutExpired:
+        p.kill()
+        return None, p.communicate()[0]

@@ -53,6 +53,12 @@ def main():
                         help='Local server to proxy (e.g. localhost:5000)')
     parser.add_argument('--camera',
                         help='Camera source override (e.g. /dev/video0)')
+    parser.add_argument('--encoder', choices=['auto', 'vaapi', 'v4l2m2m', 'software'],
+                        default='auto', help='H.264 encoder to use (default: auto)')
+    parser.add_argument('--vaapi-device',
+                        help='VAAPI device path (e.g. /dev/dri/renderD128)')
+    parser.add_argument('--vaapi-hwaccel-decode', action='store_true',
+                        help='Enable hardware decoding for MJPEG webcams (VAAPI)')
     args = parser.parse_args()
 
     ws_target = None
@@ -71,6 +77,9 @@ def main():
             "device": args.camera,
             "format": "v4l2",
             "options": {"framerate": "30", "video_size": "640x480"},
+            "encoder": args.encoder,
+            "vaapi_device": args.vaapi_device,
+            "vaapi_hwaccel_decode": args.vaapi_hwaccel_decode,
         }
 
     adapter = OctoPrintBitBang(

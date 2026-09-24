@@ -68,7 +68,8 @@ class OctoPrintBitBang(BitBangASGI):
           1. picamera2                  -- libcamera CSI (HW on Pi 4, SW on Pi 5)
           2. V4L2 device emits H.264    -- passthrough, no re-encode
           3. V4L2 raw + Pi 4 M2M encoder-- GPU re-encode (h264_v4l2m2m)
-          4. software encode (aiortc)   -- last resort
+          4. V4L2 raw + VAAPI encoder   -- GPU re-encode (h264_vaapi)
+          5. software encode (aiortc)   -- last resort
         Flat priority ladder: the first path that works wins. Returns a
         player (MediaPlayer-shaped: .video/.stop) or None for HTTP-only.
         """
@@ -97,6 +98,8 @@ class OctoPrintBitBang(BitBangASGI):
         # V4L2 device (USB webcam or legacy mmal CSI cam)
         device = source["device"]
         opts = source.get("options", {})
+        encoder_pref = source.get("encoder", "auto")
+        vaapi_dev_pref = source.get("vaapi_device") or None
         common = dict(
             video_size=opts.get("video_size", "1280x720"),
             framerate=int(opts.get("framerate", 30)),
@@ -106,33 +109,55 @@ class OctoPrintBitBang(BitBangASGI):
         try:
             from .v4l2_h264_source import (
                 V4l2H264Track, device_supports_h264, device_supports_flip,
-                has_v4l2m2m_h264_encoder, reencode_input_format)
-            # 2. device emits H.264 -> passthrough. A requested flip needs the
-            #    device's hardware flip controls (can't filter encoded video).
-            if device_supports_h264(device) and (
-                    not need_flip or device_supports_flip(device)):
-                player = V4l2H264Track(device, source_is_h264=True,
-                                       input_format="h264", **common)
-                self._logger.info(
-                    f"Opened {device} via built-in H.264 encoder "
-                    f"(hardware passthrough{', hw flip' if need_flip else ''})")
-                return player
-            # 3. raw source + Pi 4 hardware M2M encoder -> GPU re-encode
-            #    (flip via ffmpeg filter, so no device flip controls needed).
-            in_fmt = reencode_input_format(device)
-            if in_fmt and has_v4l2m2m_h264_encoder():
-                player = V4l2H264Track(device, source_is_h264=False,
-                                       input_format=in_fmt, **common)
-                self._logger.info(
-                    f"Opened {device} via h264_v4l2m2m hardware encoder "
-                    f"(GPU re-encode from {in_fmt}{', flip' if need_flip else ''})")
-                return player
+                has_v4l2m2m_h264_encoder, find_vaapi_device, reencode_input_format)
+
+            if encoder_pref != "software":
+                # 2. device emits H.264 -> passthrough. A requested flip needs the
+                #    device's hardware flip controls (can't filter encoded video).
+                if encoder_pref in ("auto", "copy") and device_supports_h264(device) and (
+                        not need_flip or device_supports_flip(device)):
+                    player = V4l2H264Track(device, source_is_h264=True,
+                                           encoder="copy",
+                                           input_format="h264", **common)
+                    self._logger.info(
+                        f"Opened {device} via built-in H.264 encoder "
+                        f"(hardware passthrough{', hw flip' if need_flip else ''})")
+                    return player
+
+                in_fmt = reencode_input_format(device)
+
+                # 3. raw source + Pi 4 hardware M2M encoder -> GPU re-encode
+                #    (flip via ffmpeg filter, so no device flip controls needed).
+                if encoder_pref in ("auto", "v4l2m2m") and in_fmt and has_v4l2m2m_h264_encoder():
+                    player = V4l2H264Track(device, source_is_h264=False,
+                                           encoder="v4l2m2m",
+                                           input_format=in_fmt, **common)
+                    self._logger.info(
+                        f"Opened {device} via h264_v4l2m2m hardware encoder "
+                        f"(GPU re-encode from {in_fmt}{', flip' if need_flip else ''})")
+                    return player
+
+                # 4. raw source + VAAPI hardware encoder -> GPU re-encode
+                #    (Intel/AMD/generic PC, flip via ffmpeg filter).
+                if encoder_pref in ("auto", "vaapi") and in_fmt:
+                    vaapi_dev = find_vaapi_device(vaapi_dev_pref)
+                    if vaapi_dev:
+                        hwaccel_dec = bool(source.get("vaapi_hwaccel_decode", False))
+                        player = V4l2H264Track(device, source_is_h264=False,
+                                               encoder="vaapi",
+                                               vaapi_device=vaapi_dev,
+                                               hwaccel_decode=hwaccel_dec,
+                                               input_format=in_fmt, **common)
+                        self._logger.info(
+                            f"Opened {device} via h264_vaapi hardware encoder on {vaapi_dev} "
+                            f"(GPU re-encode from {in_fmt}{', hwaccel decode' if hwaccel_dec else ''}{', flip' if need_flip else ''})")
+                        return player
         except Exception as e:
             self._logger.warning(
                 f"Hardware H.264 path unavailable on {device} ({e}); "
                 f"using software encode")
 
-        # 4. software encode (aiortc) -- last resort (e.g. Pi 5, raw USB cam)
+        # 5. software encode (aiortc) -- last resort (e.g. Pi 5, raw USB cam)
         try:
             from .usb_camera_source import UsbCameraSource
             player = UsbCameraSource(

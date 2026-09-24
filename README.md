@@ -138,11 +138,12 @@ See the [BitBang project page](https://github.com/richlegrand/bitbang) for the f
 
 - **Raspberry Pi 4 (32- or 64-bit OS)** -- hardware H.264 via the V4L2 M2M encoder (`h264_v4l2m2m`); tested with IMX477, IMX219
 - **Raspberry Pi 5** -- no hardware H.264 encoder; software H.264 (picamera2's `LibavH264Encoder` for CSI, aiortc for V4L2), which the A76 CPU handles at 720p@30
+- **Linux PC / laptop / SBC with Intel or AMD GPU** -- hardware H.264 re-encoding via VAAPI (`h264_vaapi` via `/dev/dri/renderD*`); tested with USB webcams
 - **CSI cameras** -- via picamera2/libcamera where available, or the legacy mmal device (`/dev/video2`) as a direct H.264 passthrough
-- **USB webcams** -- cams with onboard H.264 stream as a zero-encode passthrough; otherwise hardware-re-encoded on Pi 4 (`h264_v4l2m2m`) or software-encoded elsewhere
-- **Generic Linux PC/laptop/SBC with webcam** -- software H.264 via aiortc
+- **USB webcams** -- cams with onboard H.264 stream as a zero-encode passthrough; otherwise hardware-re-encoded on Pi 4 (`h264_v4l2m2m`) or via VAAPI (`h264_vaapi`), or software-encoded elsewhere
+- **Generic Linux PC/laptop/SBC without hardware acceleration** -- software H.264 via aiortc
 
-> **`ffmpeg` is required for the hardware H.264 paths.** The Pi CSI (legacy/mmal) passthrough and the USB hardware re-encode (`h264_v4l2m2m`) drive the system `ffmpeg` binary, which is present by default on OctoPi (the timelapse renderer depends on it). If `ffmpeg` is missing, BitBang automatically falls back to software encoding.
+> **`ffmpeg` is required for the hardware H.264 paths.** The Pi CSI (legacy/mmal) passthrough, the USB hardware re-encode on Pi 4 (`h264_v4l2m2m`), and VAAPI hardware acceleration (`h264_vaapi`) drive the system `ffmpeg` binary. If `ffmpeg` or hardware encoding is missing, BitBang automatically falls back to software encoding.
 
 ## Installation Notes
 

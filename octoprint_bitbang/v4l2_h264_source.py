@@ -84,16 +84,26 @@ def device_holders(device):
 
 def device_supports_h264(device):
     """True if the V4L2 device advertises an H.264 capture format."""
-    if not shutil.which("v4l2-ctl"):
-        return False
-    try:
-        r = subprocess.run(
-            ["v4l2-ctl", "-d", device, "--list-formats"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except Exception:
-        return False
-    return "H264" in r.stdout
+    if shutil.which("v4l2-ctl"):
+        try:
+            r = subprocess.run(
+                ["v4l2-ctl", "-d", device, "--list-formats"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return "H264" in r.stdout
+        except Exception:
+            pass
+    if shutil.which("ffmpeg"):
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-f", "v4l2", "-list_formats", "all", "-i", device],
+                capture_output=True, text=True, timeout=5,
+            )
+            out = r.stdout + r.stderr
+            return "h264" in out.lower() or "h.264" in out.lower()
+        except Exception:
+            pass
+    return False
 
 
 def device_supports_flip(device):
@@ -116,19 +126,31 @@ def reencode_input_format(device):
     """Pick a raw/decodable V4L2 input format to feed the hardware re-encoder:
     prefer MJPEG (compact over USB), else YUYV. None if the device offers
     neither (then there's nothing to hardware-encode)."""
-    if not shutil.which("v4l2-ctl"):
-        return None
-    try:
-        out = subprocess.run(
-            ["v4l2-ctl", "-d", device, "--list-formats"],
-            capture_output=True, text=True, timeout=5,
-        ).stdout
-    except Exception:
-        return None
-    if "MJPG" in out:
-        return "mjpeg"
-    if "YUYV" in out:
-        return "yuyv422"
+    if shutil.which("v4l2-ctl"):
+        try:
+            out = subprocess.run(
+                ["v4l2-ctl", "-d", device, "--list-formats"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+            if "MJPG" in out:
+                return "mjpeg"
+            if "YUYV" in out:
+                return "yuyv422"
+        except Exception:
+            pass
+    if shutil.which("ffmpeg"):
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-f", "v4l2", "-list_formats", "all", "-i", device],
+                capture_output=True, text=True, timeout=5,
+            )
+            out = (r.stdout + r.stderr).lower()
+            if "mjpeg" in out or "mjpg" in out:
+                return "mjpeg"
+            if "yuyv" in out:
+                return "yuyv422"
+        except Exception:
+            pass
     return None
 
 
@@ -154,6 +176,71 @@ def has_v4l2m2m_h264_encoder():
         return False
 
 
+def has_vaapi_h264_encoder(device="/dev/dri/renderD128"):
+    """True if the platform has a usable VAAPI H.264 encoder -- i.e. ffmpeg has
+    the h264_vaapi encoder and the DRI render node (/dev/dri/renderD128) is present."""
+    if not shutil.which("ffmpeg"):
+        return False
+    try:
+        encs = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=8,
+        ).stdout
+        if "h264_vaapi" not in encs:
+            return False
+        target = device or "/dev/dri/renderD128"
+        if os.path.exists(target):
+            return True
+        import glob
+        return bool(glob.glob("/dev/dri/renderD*"))
+    except Exception:
+        return False
+
+
+def probe_vaapi_h264(device_path):
+    """Test whether ffmpeg can actually encode a test frame with h264_vaapi
+    using the specified VAAPI device."""
+    if not shutil.which("ffmpeg"):
+        return False
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-vaapi_device", device_path,
+        "-f", "lavfi", "-i", "testsrc=s=64x64:r=1",
+        "-frames:v", "1",
+        "-vf", "format=nv12,hwupload",
+        "-c:v", "h264_vaapi",
+        "-f", "null", "-",
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=3)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def find_vaapi_device(explicit_device=None):
+    """Find a usable VAAPI device path for H.264 encoding.
+
+    Checks /dev/dri/renderD128 (or an explicit device) and verifies ffmpeg
+    has h264_vaapi support. Returns the device path if present, else None.
+    """
+    if explicit_device and os.path.exists(explicit_device):
+        if has_vaapi_h264_encoder(explicit_device):
+            return explicit_device
+        return None
+
+    default_node = "/dev/dri/renderD128"
+    if os.path.exists(default_node) and has_vaapi_h264_encoder(default_node):
+        return default_node
+
+    import glob
+    for node in sorted(glob.glob("/dev/dri/renderD*")):
+        if has_vaapi_h264_encoder(node):
+            return node
+
+    return None
+
+
 class V4l2H264Track(MediaStreamTrack):
     """aiortc video track backed by a V4L2 device's built-in H.264 encoder.
 
@@ -168,6 +255,7 @@ class V4l2H264Track(MediaStreamTrack):
     kind = "video"
 
     def __init__(self, device, source_is_h264=True, input_format="h264",
+                 encoder=None, vaapi_device=None, hwaccel_decode=False,
                  video_size="1280x720", framerate=30,
                  bitrate=4_000_000, gop=30, brightness=0,
                  flip_horizontal=False, flip_vertical=False, logger=None):
@@ -177,18 +265,28 @@ class V4l2H264Track(MediaStreamTrack):
 
         self.device = device
         self._logger = logger or _log
-        # source_is_h264=True  -> device emits H.264; ffmpeg `-c copy` (passthrough).
-        # source_is_h264=False -> raw/MJPEG source; ffmpeg `-c:v h264_v4l2m2m`
-        #                         (Pi 4 GPU re-encode). Same downstream pipeline.
-        self._source_is_h264 = bool(source_is_h264)
+        # encoder="copy" / source_is_h264=True  -> device emits H.264; ffmpeg `-c copy` (passthrough).
+        # encoder="v4l2m2m"                     -> raw/MJPEG source; ffmpeg `-c:v h264_v4l2m2m`
+        #                                          (Pi 4 GPU re-encode).
+        # encoder="vaapi"                       -> raw/MJPEG source; ffmpeg `-c:v h264_vaapi`
+        #                                          (VAAPI GPU re-encode).
+        if encoder:
+            self._encoder = encoder
+            self._source_is_h264 = (encoder == "copy")
+        else:
+            self._source_is_h264 = bool(source_is_h264)
+            self._encoder = "copy" if self._source_is_h264 else "v4l2m2m"
+        self._vaapi_device = vaapi_device or "/dev/dri/renderD128"
+        self._hwaccel_decode = bool(hwaccel_decode)
         self._input_format = input_format
         self._video_size = video_size
         self._framerate = int(framerate)
         self._bitrate = int(bitrate)
         self._gop = int(gop)
         # Passthrough: flip in hardware via the camera's V4L2 hflip/vflip (before
-        # its encoder). Re-encode: flip with an ffmpeg filter before the M2M
-        # encoder (we're decoding anyway), so it works on cams without flip ctrls.
+        # its encoder). Re-encode: flip with an ffmpeg filter before the
+        # hardware encoder (we're decoding anyway), so it works on cams without
+        # flip ctrls.
         self._flip_h = bool(flip_horizontal)
         self._flip_v = bool(flip_vertical)
 
@@ -222,7 +320,7 @@ class V4l2H264Track(MediaStreamTrack):
         hardware flip. Must run before ffmpeg opens the device. For the
         re-encode path these are ffmpeg args / a filter instead, so skip them
         (they're mmal-specific and meaningless on a USB cam)."""
-        if not shutil.which("v4l2-ctl") or not self._source_is_h264:
+        if not shutil.which("v4l2-ctl") or not self._source_is_h264 or self._encoder != "copy":
             return
         self._set_ctrl("repeat_sequence_header=1")
         self._set_ctrl(f"h264_i_frame_period={self._gop}")
@@ -269,12 +367,47 @@ class V4l2H264Track(MediaStreamTrack):
         # Shared capture front-end; only the encode stage differs.
         cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer",
+        ]
+        # Hardware decode is applicable for VAAPI when input is MJPEG and no
+        # software orientation filters (flip) are requested.
+        use_hwaccel_decode = (
+            self._encoder == "vaapi" and
+            self._hwaccel_decode and
+            self._input_format == "mjpeg" and
+            not (self._flip_h or self._flip_v)
+        )
+        if self._encoder == "vaapi":
+            if use_hwaccel_decode:
+                cmd += [
+                    "-hwaccel", "vaapi",
+                    "-hwaccel_device", self._vaapi_device,
+                    "-hwaccel_output_format", "vaapi",
+                ]
+            else:
+                cmd += ["-vaapi_device", self._vaapi_device]
+        cmd += [
             "-f", "v4l2", "-input_format", self._input_format,
             "-video_size", self._video_size, "-framerate", str(self._framerate),
             "-i", self.device, "-an",
         ]
-        if self._source_is_h264:
+        if self._source_is_h264 or self._encoder == "copy":
             cmd += ["-c", "copy"]                      # passthrough, no re-encode
+        elif self._encoder == "vaapi":
+            if use_hwaccel_decode:
+                # Frames decoded directly into VAAPI surfaces; encode directly.
+                cmd += ["-c:v", "h264_vaapi",
+                        "-b:v", str(self._bitrate), "-g", str(self._gop),
+                        "-bf", "0"]
+            else:
+                # Hardware VAAPI re-encode: upload nv12 frames to the VAAPI surface.
+                vf = [f for f, on in (("hflip", self._flip_h),
+                                      ("vflip", self._flip_v)) if on]
+                vf.append("format=nv12")
+                vf.append("hwupload")
+                cmd += ["-vf", ",".join(vf),
+                        "-c:v", "h264_vaapi",
+                        "-b:v", str(self._bitrate), "-g", str(self._gop),
+                        "-bf", "0"]
         else:
             # h264_v4l2m2m requires yuv420p input; MJPEG/YUYV decode to other
             # pixel formats, so always convert (and apply any flip in the same
@@ -286,8 +419,8 @@ class V4l2H264Track(MediaStreamTrack):
                     "-c:v", "h264_v4l2m2m",            # Pi 4 GPU encoder
                     "-b:v", str(self._bitrate), "-g", str(self._gop)]
         bsf = _VUI_BSF
-        if not self._source_is_h264:
-            # h264_v4l2m2m emits SPS/PPS only once at stream start (libav then
+        if not self._source_is_h264 and self._encoder != "copy":
+            # Re-encoders emit SPS/PPS only once at stream start (libav then
             # captures them as extradata and strips them from later packets),
             # so a decoder that joins mid-stream — e.g. a browser opening the
             # WebRTC video track — never sees parameter sets and renders black.

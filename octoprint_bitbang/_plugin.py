@@ -156,6 +156,10 @@ class BitBangPlugin(
 
         brightness = self._settings.get_int(["brightness"]) or 0
 
+        encoder = self._settings.get(["encoder"]) or "auto"
+        vaapi_device = self._settings.get(["vaapi_device"]) or ""
+        vaapi_hwaccel_decode = self._settings.get_boolean(["vaapi_hwaccel_decode"])
+
         if camera_device == "picamera2":
             w, h = (int(x) for x in camera_resolution.split("x"))
             camera = {
@@ -164,6 +168,9 @@ class BitBangPlugin(
                 "flip_horizontal": flip_h,
                 "flip_vertical": flip_v,
                 "brightness": brightness,
+                "encoder": encoder,
+                "vaapi_device": vaapi_device,
+                "vaapi_hwaccel_decode": vaapi_hwaccel_decode,
             }
             self._logger.info(f"Camera: picamera2 at {camera_resolution}")
         elif camera_device:
@@ -175,6 +182,9 @@ class BitBangPlugin(
                 "flip_horizontal": flip_h,
                 "flip_vertical": flip_v,
                 "brightness": brightness,
+                "encoder": encoder,
+                "vaapi_device": vaapi_device,
+                "vaapi_hwaccel_decode": vaapi_hwaccel_decode,
             }
             self._logger.info(f"Camera: {camera_device} at {camera_resolution}")
         else:
@@ -183,6 +193,9 @@ class BitBangPlugin(
                 camera["flip_horizontal"] = flip_h
                 camera["flip_vertical"] = flip_v
                 camera["brightness"] = brightness
+                camera["encoder"] = encoder
+                camera["vaapi_device"] = vaapi_device
+                camera["vaapi_hwaccel_decode"] = vaapi_hwaccel_decode
                 if camera["type"] == "picamera2":
                     w, h = (int(x) for x in camera_resolution.split("x"))
                     camera["size"] = (w, h)
@@ -804,6 +817,9 @@ class BitBangPlugin(
             "flip_vertical": False,
             "brightness": 0,
             "signaling_server": "bitba.ng",
+            "encoder": "auto",
+            "vaapi_device": "",
+            "vaapi_hwaccel_decode": False,
         }
 
     def on_settings_save(self, data):

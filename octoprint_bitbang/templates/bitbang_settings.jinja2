@@ -94,6 +94,43 @@
         <h3>Advanced</h3>
 
         <div class="control-group">
+            <label class="control-label">Hardware encoder</label>
+            <div class="controls">
+                <select class="input-medium"
+                        data-bind="value: settings.settings.plugins.bitbang.encoder">
+                    <option value="auto">Auto-detect</option>
+                    <option value="vaapi">VAAPI (h264_vaapi)</option>
+                    <option value="v4l2m2m">V4L2 M2M (Raspberry Pi 4)</option>
+                    <option value="software">Software (CPU)</option>
+                </select>
+                <span class="help-inline">Encoder used for USB cameras. Auto-detect picks VAAPI, V4L2 M2M, or software encode.</span>
+            </div>
+        </div>
+
+        <div class="control-group" data-bind="visible: settings.settings.plugins.bitbang.encoder() === 'vaapi' || settings.settings.plugins.bitbang.encoder() === 'auto'">
+            <label class="control-label">VAAPI device</label>
+            <div class="controls">
+                <input type="text" class="input-large"
+                       data-bind="value: settings.settings.plugins.bitbang.vaapi_device"
+                       placeholder="/dev/dri/renderD128">
+                <span class="help-inline">DRM render node for VAAPI (default: <code>/dev/dri/renderD128</code>).</span>
+            </div>
+        </div>
+
+        <div class="control-group" data-bind="visible: settings.settings.plugins.bitbang.encoder() === 'vaapi' || settings.settings.plugins.bitbang.encoder() === 'auto'">
+            <div class="controls">
+                <label class="checkbox">
+                    <input type="checkbox"
+                           data-bind="checked: settings.settings.plugins.bitbang.vaapi_hwaccel_decode">
+                    Enable hardware decoding for MJPEG webcams (Intel VAAPI)
+                </label>
+                <span class="help-block muted">
+                    Decodes MJPEG directly on GPU via <code>-hwaccel vaapi</code> (zero-copy decode &amp; encode). If disabled or when orientation flip is active, software decode with hardware upload is used.
+                </span>
+            </div>
+        </div>
+
+        <div class="control-group">
             <label class="control-label">Signaling server</label>
             <div class="controls">
                 <input type="text" class="input-xlarge"

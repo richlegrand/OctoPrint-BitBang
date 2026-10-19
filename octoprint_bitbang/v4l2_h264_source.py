@@ -176,9 +176,9 @@ def has_v4l2m2m_h264_encoder():
         return False
 
 
-def has_vaapi_h264_encoder(device="/dev/dri/renderD128"):
+def has_vaapi_h264_encoder(device=None):
     """True if the platform has a usable VAAPI H.264 encoder -- i.e. ffmpeg has
-    the h264_vaapi encoder and the DRI render node (/dev/dri/renderD128) is present."""
+    the h264_vaapi encoder and a DRI render node is present."""
     if not shutil.which("ffmpeg"):
         return False
     try:
@@ -188,8 +188,9 @@ def has_vaapi_h264_encoder(device="/dev/dri/renderD128"):
         ).stdout
         if "h264_vaapi" not in encs:
             return False
-        target = device or "/dev/dri/renderD128"
-        if os.path.exists(target):
+        if device:
+            return os.path.exists(device)
+        if os.path.exists("/dev/dri/renderD128"):
             return True
         import glob
         return bool(glob.glob("/dev/dri/renderD*"))
@@ -219,25 +220,16 @@ def probe_vaapi_h264(device_path):
 
 
 def find_vaapi_device(explicit_device=None):
-    """Find a usable VAAPI device path for H.264 encoding.
-
-    Checks /dev/dri/renderD128 (or an explicit device) and verifies ffmpeg
-    has h264_vaapi support. Returns the device path if present, else None.
-    """
-    if explicit_device and os.path.exists(explicit_device):
-        if has_vaapi_h264_encoder(explicit_device):
-            return explicit_device
-        return None
-
-    default_node = "/dev/dri/renderD128"
-    if os.path.exists(default_node) and has_vaapi_h264_encoder(default_node):
-        return default_node
-
+    """Find a render node whose driver can actually encode H.264."""
     import glob
-    for node in sorted(glob.glob("/dev/dri/renderD*")):
-        if has_vaapi_h264_encoder(node):
+    if not has_vaapi_h264_encoder():
+        return None
+    if explicit_device:
+        return explicit_device if probe_vaapi_h264(explicit_device) else None
+    nodes = ["/dev/dri/renderD128"] + sorted(glob.glob("/dev/dri/renderD*"))
+    for node in dict.fromkeys(nodes):
+        if os.path.exists(node) and probe_vaapi_h264(node):
             return node
-
     return None
 
 
@@ -270,12 +262,7 @@ class V4l2H264Track(MediaStreamTrack):
         #                                          (Pi 4 GPU re-encode).
         # encoder="vaapi"                       -> raw/MJPEG source; ffmpeg `-c:v h264_vaapi`
         #                                          (VAAPI GPU re-encode).
-        if encoder:
-            self._encoder = encoder
-            self._source_is_h264 = (encoder == "copy")
-        else:
-            self._source_is_h264 = bool(source_is_h264)
-            self._encoder = "copy" if self._source_is_h264 else "v4l2m2m"
+        self._encoder = encoder or ("copy" if source_is_h264 else "v4l2m2m")
         self._vaapi_device = vaapi_device or "/dev/dri/renderD128"
         self._hwaccel_decode = bool(hwaccel_decode)
         self._input_format = input_format
@@ -320,7 +307,7 @@ class V4l2H264Track(MediaStreamTrack):
         hardware flip. Must run before ffmpeg opens the device. For the
         re-encode path these are ffmpeg args / a filter instead, so skip them
         (they're mmal-specific and meaningless on a USB cam)."""
-        if not shutil.which("v4l2-ctl") or not self._source_is_h264 or self._encoder != "copy":
+        if not shutil.which("v4l2-ctl") or self._encoder != "copy":
             return
         self._set_ctrl("repeat_sequence_header=1")
         self._set_ctrl(f"h264_i_frame_period={self._gop}")
@@ -390,7 +377,7 @@ class V4l2H264Track(MediaStreamTrack):
             "-video_size", self._video_size, "-framerate", str(self._framerate),
             "-i", self.device, "-an",
         ]
-        if self._source_is_h264 or self._encoder == "copy":
+        if self._encoder == "copy":
             cmd += ["-c", "copy"]                      # passthrough, no re-encode
         elif self._encoder == "vaapi":
             if use_hwaccel_decode:
@@ -419,7 +406,7 @@ class V4l2H264Track(MediaStreamTrack):
                     "-c:v", "h264_v4l2m2m",            # Pi 4 GPU encoder
                     "-b:v", str(self._bitrate), "-g", str(self._gop)]
         bsf = _VUI_BSF
-        if not self._source_is_h264 and self._encoder != "copy":
+        if self._encoder != "copy":
             # Re-encoders emit SPS/PPS only once at stream start (libav then
             # captures them as extradata and strips them from later packets),
             # so a decoder that joins mid-stream — e.g. a browser opening the

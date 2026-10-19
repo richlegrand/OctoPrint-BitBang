@@ -50,7 +50,15 @@ class TestVaapiEncoder(unittest.TestCase):
     @patch("glob.glob", return_value=[])
     def test_has_vaapi_h264_encoder_false_when_renderD128_missing(self, mock_glob, mock_exists, mock_run, mock_which):
         mock_run.return_value = MagicMock(stdout=" V..... h264_vaapi           H.264/AVC (VAAPI) (encoders: h264_vaapi )")
-        self.assertFalse(has_vaapi_h264_encoder("/dev/dri/renderD128"))
+        self.assertFalse(has_vaapi_h264_encoder())
+
+    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("subprocess.run")
+    @patch("os.path.exists", return_value=False)
+    @patch("glob.glob", return_value=["/dev/dri/renderD128"])
+    def test_has_vaapi_h264_encoder_false_for_missing_specific_node(self, mock_glob, mock_exists, mock_run, mock_which):
+        mock_run.return_value = MagicMock(stdout=" V..... h264_vaapi           H.264/AVC (VAAPI) (encoders: h264_vaapi )")
+        self.assertFalse(has_vaapi_h264_encoder("/dev/dri/renderD129"))
 
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")
     @patch("subprocess.run")
@@ -79,17 +87,41 @@ class TestVaapiEncoder(unittest.TestCase):
         mock_run.return_value = MagicMock(returncode=1)
         self.assertFalse(probe_vaapi_h264("/dev/dri/renderD128"))
 
+    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_h264", return_value=True)
     @patch("octoprint_bitbang.v4l2_h264_source.has_vaapi_h264_encoder", return_value=True)
-    @patch("os.path.exists", return_value=True)
-    def test_find_vaapi_device_explicit(self, mock_exists, mock_has):
+    def test_find_vaapi_device_explicit(self, mock_has, mock_probe):
         dev = find_vaapi_device("/dev/dri/renderD129")
         self.assertEqual(dev, "/dev/dri/renderD129")
+        mock_probe.assert_called_once_with("/dev/dri/renderD129")
 
+    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_h264", return_value=False)
+    @patch("octoprint_bitbang.v4l2_h264_source.has_vaapi_h264_encoder", return_value=True)
+    def test_find_vaapi_device_explicit_fails_probe(self, mock_has, mock_probe):
+        self.assertIsNone(find_vaapi_device("/dev/dri/renderD129"))
+
+    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_h264", return_value=True)
     @patch("octoprint_bitbang.v4l2_h264_source.has_vaapi_h264_encoder", return_value=True)
     @patch("os.path.exists", side_effect=lambda p: p == "/dev/dri/renderD128")
-    def test_find_vaapi_device_autodetect_renderD128(self, mock_exists, mock_has):
+    def test_find_vaapi_device_autodetect_renderD128(self, mock_exists, mock_has, mock_probe):
         dev = find_vaapi_device()
         self.assertEqual(dev, "/dev/dri/renderD128")
+        mock_probe.assert_called_once_with("/dev/dri/renderD128")
+
+    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_h264",
+           side_effect=lambda p: p == "/dev/dri/renderD129")
+    @patch("octoprint_bitbang.v4l2_h264_source.has_vaapi_h264_encoder", return_value=True)
+    @patch("glob.glob", return_value=["/dev/dri/renderD128", "/dev/dri/renderD129"])
+    @patch("os.path.exists", return_value=True)
+    def test_find_vaapi_device_skips_non_encoding_node(self, mock_exists, mock_glob, mock_has, mock_probe):
+        dev = find_vaapi_device()
+        self.assertEqual(dev, "/dev/dri/renderD129")
+
+    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_h264", return_value=False)
+    @patch("octoprint_bitbang.v4l2_h264_source.has_vaapi_h264_encoder", return_value=True)
+    @patch("glob.glob", return_value=["/dev/dri/renderD128", "/dev/dri/renderD129"])
+    @patch("os.path.exists", return_value=True)
+    def test_find_vaapi_device_none_when_no_node_can_encode(self, mock_exists, mock_glob, mock_has, mock_probe):
+        self.assertIsNone(find_vaapi_device())
 
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")
     def test_v4l2_h264_track_cmd_vaapi_upload(self, mock_which):
@@ -303,8 +335,9 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")
     @patch("octoprint_bitbang.v4l2_h264_source.reencode_input_format", return_value="mjpeg")
     @patch("octoprint_bitbang.v4l2_h264_source.has_v4l2m2m_h264_encoder", return_value=False)
+    @patch("octoprint_bitbang.v4l2_h264_source.device_supports_h264", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.find_vaapi_device", return_value="/dev/dri/renderD129")
-    def test_adapter_explicit_vaapi_pref(self, mock_vaapi_dev, mock_m2m, mock_fmt, mock_which):
+    def test_adapter_explicit_vaapi_pref(self, mock_vaapi_dev, mock_h264, mock_m2m, mock_fmt, mock_which):
         from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
 
         async def _app(scope, receive, send):

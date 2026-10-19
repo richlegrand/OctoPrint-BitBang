@@ -112,11 +112,13 @@ class OctoPrintBitBang(BitBangASGI):
                 has_v4l2m2m_h264_encoder, find_vaapi_device, reencode_input_format)
 
             if encoder_pref != "software":
+                source_is_h264 = device_supports_h264(device)
+
                 # 2. device emits H.264 -> passthrough. A requested flip needs the
                 #    device's hardware flip controls (can't filter encoded video).
-                if encoder_pref in ("auto", "copy") and device_supports_h264(device) and (
+                if encoder_pref == "auto" and source_is_h264 and (
                         not need_flip or device_supports_flip(device)):
-                    player = V4l2H264Track(device, source_is_h264=True,
+                    player = V4l2H264Track(device, source_is_h264=source_is_h264,
                                            encoder="copy",
                                            input_format="h264", **common)
                     self._logger.info(
@@ -129,7 +131,7 @@ class OctoPrintBitBang(BitBangASGI):
                 # 3. raw source + Pi 4 hardware M2M encoder -> GPU re-encode
                 #    (flip via ffmpeg filter, so no device flip controls needed).
                 if encoder_pref in ("auto", "v4l2m2m") and in_fmt and has_v4l2m2m_h264_encoder():
-                    player = V4l2H264Track(device, source_is_h264=False,
+                    player = V4l2H264Track(device, source_is_h264=source_is_h264,
                                            encoder="v4l2m2m",
                                            input_format=in_fmt, **common)
                     self._logger.info(
@@ -143,7 +145,7 @@ class OctoPrintBitBang(BitBangASGI):
                     vaapi_dev = find_vaapi_device(vaapi_dev_pref)
                     if vaapi_dev:
                         hwaccel_dec = bool(source.get("vaapi_hwaccel_decode", False))
-                        player = V4l2H264Track(device, source_is_h264=False,
+                        player = V4l2H264Track(device, source_is_h264=source_is_h264,
                                                encoder="vaapi",
                                                vaapi_device=vaapi_dev,
                                                hwaccel_decode=hwaccel_dec,

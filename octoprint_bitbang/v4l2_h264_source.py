@@ -203,6 +203,15 @@ class V4l2H264Track(MediaStreamTrack):
         # Tail of ffmpeg's stderr, so a failure can say *why* rather than just
         # going quiet ("Device or resource busy" lands here).
         self._stderr_tail = deque(maxlen=20)
+        # Presentation timestamps span every ffmpeg run, not one of them. A
+        # reopened capture continues the timeline where the last one stopped,
+        # rather than restarting at zero and sending pts backwards. The outage
+        # itself is not represented: a gap of real seconds would be truthful
+        # but hands the browser's jitter buffer a jump it has no reason to
+        # tolerate, and nothing downstream needs to know the stream paused.
+        self._pts_base_us = 0
+        self._pts_last_us = None
+        self._frame_us = max(1, int(1_000_000 / max(1, self._framerate)))
 
         self._brightness_range = self._query_brightness_range()
         if self._brightness_range:
@@ -312,6 +321,20 @@ class V4l2H264Track(MediaStreamTrack):
             except Exception:
                 pass
 
+    def _begin_pts_run(self):
+        """Start this run's timestamps one frame after the last run's final
+        packet, so a reopened capture continues the timeline instead of
+        restarting it."""
+        if self._pts_last_us is not None:
+            self._pts_base_us = self._pts_last_us + self._frame_us
+
+    def _pts_for(self, now, base):
+        """pts, in microseconds, for a packet captured at `now` in a run whose
+        first packet arrived at `base`."""
+        pts = self._pts_base_us + int((now - base) * 1_000_000)
+        self._pts_last_us = pts
+        return pts
+
     def _run_once(self):
         """Run one ffmpeg capture until it ends. Returns None if we stopped it
         on purpose, otherwise a short string describing why it ended."""
@@ -324,6 +347,7 @@ class V4l2H264Track(MediaStreamTrack):
                          name="v4l2-h264-err", daemon=True).start()
         self._container = av.open(self._proc.stdout, format="h264")
         stream = self._container.streams.video[0]
+        self._begin_pts_run()
         base = None
         for packet in self._container.demux(stream):
             if self._stop.is_set():
@@ -335,7 +359,7 @@ class V4l2H264Track(MediaStreamTrack):
             if base is None:
                 base = now
             pkt = av.Packet(data)
-            pkt.pts = int((now - base) * 1_000_000)
+            pkt.pts = self._pts_for(now, base)
             pkt.dts = pkt.pts
             pkt.time_base = _TIME_BASE
             pkt.is_keyframe = bool(packet.is_keyframe)

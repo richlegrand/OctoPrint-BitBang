@@ -45,6 +45,21 @@ _TIME_BASE = Fraction(1, 1_000_000)
 _VUI_BSF = ("h264_metadata=video_full_range_flag=1:"
             "matrix_coefficients=1:colour_primaries=1:transfer_characteristics=1")
 
+# Reopening policy for a capture that ended on its own.
+#
+# The decision is how long the run lasted, not how many attempts have been
+# made. A capture that ran for hours and then stopped is a camera that
+# disconnected, and it will very likely come back; retrying that indefinitely
+# is right. A capture that ends within seconds, again and again, is a
+# configuration that cannot work -- a missing device, an encoder the GPU does
+# not have, another process holding the camera -- and retrying it forever only
+# hides the problem. So a run that lasts past _RUN_ESTABLISHED clears the
+# count, which means a camera that drops once a day never exhausts its budget.
+_RUN_ESTABLISHED = 10.0      # seconds; past this, the capture really started
+_MAX_FAILED_STARTS = 5       # consecutive sub-_RUN_ESTABLISHED runs before stopping
+_REOPEN_BACKOFF = (1.0, 2.0, 5.0, 10.0, 15.0)
+_DEVICE_WAIT = 30.0          # seconds to wait for the device node to reappear
+
 def device_holders(device):
     """Best-effort list of "pid NAME" strings for processes holding `device`
     open.
@@ -162,7 +177,8 @@ class V4l2H264Track(MediaStreamTrack):
     oldest on overflow so the live stream never stalls). recv() returns
     av.Packet, matching PiH264Track's passthrough contract. If ffmpeg dies the
     reason is logged (stderr tail plus any other process holding the device) and
-    the track fails; recovery is an OctoPrint restart.
+    the device is reopened; the track only fails once reopening keeps failing
+    straight away, which is a camera that is gone rather than one that blinked.
     """
 
     kind = "video"
@@ -383,26 +399,76 @@ class V4l2H264Track(MediaStreamTrack):
                 f"{', '.join(holders)} -- another plugin or service is using "
                 f"the camera")
 
+    def _wait_for_device(self, timeout=_DEVICE_WAIT):
+        """Wait for the device node to come back, up to `timeout`.
+
+        A USB re-enumerate takes the node away and returns it a few seconds
+        later, usually under the same name. Reopening before it is back fails
+        for a reason that says nothing about whether the camera is coming."""
+        deadline = time.monotonic() + timeout
+        while not self._stop.is_set():
+            if os.path.exists(self.device):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            self._stop.wait(0.5)
+        return False
+
     def _capture_loop(self):
-        """Run the capture, and report why it ended. A dead capture stays dead
-        (the track fails and the user restarts OctoPrint); the point here is
-        that the log says what happened instead of going silent."""
-        started = time.monotonic()
-        try:
-            reason = self._run_once()
-        except Exception as e:  # noqa: BLE001 - reported, then surfaced to recv()
-            reason = str(e) or e.__class__.__name__
-        finally:
-            self._close_proc()
-        if self._stop.is_set() or reason is None:
-            return
-        self._log_failure(reason, time.monotonic() - started)
-        self._logger.error(
-            f"BitBang: no more video from {self.device} -- restart OctoPrint "
-            f"once the camera is free")
-        self._loop.call_soon_threadsafe(
-            self._fail,
-            RuntimeError(f"V4L2 capture on {self.device} failed: {reason}"))
+        """Run the capture, reopening the device when it ends on its own.
+
+        Gives up only when reopening keeps failing straight away -- see the
+        policy constants. Until then the track stays alive and `recv()` simply
+        waits, so a camera that drops off USB shows up as a stall rather than
+        video that never comes back."""
+        failed_starts = 0
+        while not self._stop.is_set():
+            started = time.monotonic()
+            try:
+                reason = self._run_once()
+            except Exception as e:  # noqa: BLE001 - reported, then maybe surfaced
+                reason = str(e) or e.__class__.__name__
+            finally:
+                self._close_proc()
+            if self._stop.is_set() or reason is None:
+                return
+
+            ran = time.monotonic() - started
+            if ran >= _RUN_ESTABLISHED:
+                failed_starts = 0
+            else:
+                failed_starts += 1
+
+            # The first failure of an episode gets the whole story -- ffmpeg's
+            # stderr and whoever else holds the device. Repeats get one line,
+            # so a camera that drops daily does not fill the journal.
+            if failed_starts <= 1:
+                self._log_failure(reason, ran)
+            else:
+                self._logger.warning(
+                    f"BitBang: capture on {self.device} failed again after "
+                    f"{ran:.1f}s ({failed_starts}/{_MAX_FAILED_STARTS}): "
+                    f"{reason}")
+
+            if failed_starts >= _MAX_FAILED_STARTS:
+                self._logger.error(
+                    f"BitBang: giving up on {self.device} after "
+                    f"{_MAX_FAILED_STARTS} failed starts -- the camera is gone, "
+                    f"in use, or configured in a way this machine cannot run")
+                self._loop.call_soon_threadsafe(
+                    self._fail,
+                    RuntimeError(
+                        f"V4L2 capture on {self.device} failed: {reason}"))
+                return
+
+            if not self._wait_for_device():
+                self._logger.warning(
+                    f"BitBang: {self.device} has not come back after "
+                    f"{_DEVICE_WAIT:.0f}s; still trying")
+            delay = _REOPEN_BACKOFF[min(failed_starts, len(_REOPEN_BACKOFF) - 1)]
+            if self._stop.wait(delay):
+                return
+            self._logger.info(f"BitBang: reopening {self.device}")
 
     def _enqueue(self, pkt):
         if self._queue.full():

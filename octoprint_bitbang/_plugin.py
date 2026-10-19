@@ -168,9 +168,6 @@ class BitBangPlugin(
                 "flip_horizontal": flip_h,
                 "flip_vertical": flip_v,
                 "brightness": brightness,
-                "encoder": encoder,
-                "vaapi_device": vaapi_device,
-                "vaapi_hwaccel_decode": vaapi_hwaccel_decode,
             }
             self._logger.info(f"Camera: picamera2 at {camera_resolution}")
         elif camera_device:
@@ -193,14 +190,14 @@ class BitBangPlugin(
                 camera["flip_horizontal"] = flip_h
                 camera["flip_vertical"] = flip_v
                 camera["brightness"] = brightness
-                camera["encoder"] = encoder
-                camera["vaapi_device"] = vaapi_device
-                camera["vaapi_hwaccel_decode"] = vaapi_hwaccel_decode
                 if camera["type"] == "picamera2":
                     w, h = (int(x) for x in camera_resolution.split("x"))
                     camera["size"] = (w, h)
                 else:
                     camera.setdefault("options", {})["video_size"] = camera_resolution
+                    camera["encoder"] = encoder
+                    camera["vaapi_device"] = vaapi_device
+                    camera["vaapi_hwaccel_decode"] = vaapi_hwaccel_decode
                 self._logger.info(f"Camera: {camera['type']} at {camera_resolution}")
             else:
                 self._logger.info("No camera detected, HTTP-only mode")

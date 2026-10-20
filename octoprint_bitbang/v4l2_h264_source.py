@@ -97,6 +97,45 @@ def device_holders(device):
     return holders
 
 
+# Streamers that commonly own the camera on an OctoPrint host. OctoPi's
+# webcamd runs mjpg_streamer; DietPi ships mjpg-streamer; newer images use
+# camera-streamer.
+_KNOWN_STREAMERS = ("mjpg_streamer", "mjpg-streamer", "camera-streamer",
+                    "ustreamer", "libcamera-vid", "raspivid", "motion")
+
+
+def running_streamers():
+    """Best-effort list of "pid NAME" for streamer processes that are running,
+    whoever owns them.
+
+    This exists because device_holders cannot see the holder that matters
+    most. /proc/<pid>/fd is readable only for our own processes, so a
+    systemd-managed streamer running as root never appears there -- and on an
+    OctoPrint host that is the usual reason the camera is busy.
+    /proc/<pid>/comm is world-readable, so a name is still available.
+
+    Not proof that one of these holds the device: a name is all we get. But
+    naming a streamer that is running beats reporting nothing when the device
+    is busy and our own scan came back empty.
+    """
+    found = []
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return found
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        try:
+            with open(os.path.join("/proc", pid, "comm")) as f:
+                name = f.read().strip()
+        except OSError:
+            continue  # exited mid-scan
+        if name in _KNOWN_STREAMERS:
+            found.append(f"pid {pid} ({name})")
+    return found
+
+
 def device_supports_h264(device):
     """True if the V4L2 device advertises an H.264 capture format."""
     if shutil.which("v4l2-ctl"):
@@ -510,14 +549,35 @@ class V4l2H264Track(MediaStreamTrack):
             f"{ran_seconds:.1f}s: {reason}")
         for line in self._stderr_tail:
             self._logger.warning(f"BitBang:   ffmpeg: {line}")
-        # Our own ffmpeg is already reaped by now, so anything still holding the
-        # device is someone else -- usually what caused the failure.
+        self._log_contention()
+
+    def _log_contention(self):
+        """Say who else has the camera, as far as we can tell.
+
+        Our own ffmpeg is already reaped by the time this runs, so anything
+        still holding the device is someone else -- usually what caused the
+        failure. Reported from both the failure path and the give-up path,
+        because contention can start after the first failure: a streamer that
+        retries will take the device during the gap, and then the first
+        failure's report is the one that saw nothing.
+        """
         holders = device_holders(self.device)
         if holders:
             self._logger.warning(
                 f"BitBang:   {self.device} is held open by "
                 f"{', '.join(holders)} -- another plugin or service is using "
                 f"the camera")
+            return
+        # Nothing in our own scan, which is not the same as nothing at all --
+        # see running_streamers.
+        streamers = running_streamers()
+        if streamers:
+            self._logger.warning(
+                f"BitBang:   nothing we can see holds {self.device}, but "
+                f"{', '.join(streamers)} is running. A streamer owned by "
+                f"another user does not appear in our scan, so this is the "
+                f"likely holder. On OctoPi: "
+                f"sudo systemctl disable --now webcamd ffmpeg_hls camera-streamer")
 
     def _wait_for_device(self, timeout=_DEVICE_WAIT):
         """Wait for the device node to come back, up to `timeout`.
@@ -542,6 +602,7 @@ class V4l2H264Track(MediaStreamTrack):
         waits, so a camera that drops off USB shows up as a stall rather than
         video that never comes back."""
         failed_starts = 0
+        reported_tail = []
         while not self._stop.is_set():
             started = time.monotonic()
             try:
@@ -562,19 +623,34 @@ class V4l2H264Track(MediaStreamTrack):
             # The first failure of an episode gets the whole story -- ffmpeg's
             # stderr and whoever else holds the device. Repeats get one line,
             # so a camera that drops daily does not fill the journal.
+            tail = list(self._stderr_tail)
             if failed_starts <= 1:
                 self._log_failure(reason, ran)
+                reported_tail = tail
             else:
                 self._logger.warning(
                     f"BitBang: capture on {self.device} failed again after "
                     f"{ran:.1f}s ({failed_starts}/{_MAX_FAILED_STARTS}): "
                     f"{reason}")
+                # ...unless the repeat has something new to say. The first
+                # failure of an episode is often the least informative one:
+                # a process that was killed prints nothing, and it is the
+                # reopen that reports "Device or resource busy". Printing a
+                # tail we have not printed yet costs one block per distinct
+                # error rather than one per attempt.
+                if tail and tail != reported_tail:
+                    for line in tail:
+                        self._logger.warning(f"BitBang:   ffmpeg: {line}")
+                    reported_tail = tail
 
             if failed_starts >= _MAX_FAILED_STARTS:
                 self._logger.error(
                     f"BitBang: giving up on {self.device} after "
                     f"{_MAX_FAILED_STARTS} failed starts -- the camera is gone, "
                     f"in use, or configured in a way this machine cannot run")
+                # Ask again here rather than relying on the first failure's
+                # report: whoever took the device may have taken it after that.
+                self._log_contention()
                 self._loop.call_soon_threadsafe(
                     self._fail,
                     RuntimeError(

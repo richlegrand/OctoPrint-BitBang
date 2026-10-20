@@ -69,7 +69,8 @@ class OctoPrintBitBang(BitBangASGI):
           2. V4L2 device emits H.264    -- passthrough, no re-encode
           3. V4L2 raw + Pi 4 M2M encoder-- GPU re-encode (h264_v4l2m2m)
           4. V4L2 raw + VAAPI encoder   -- GPU re-encode (h264_vaapi)
-          5. software encode (aiortc)   -- last resort
+          5. V4L2 raw + libx264         -- software encode in the ffmpeg child
+          6. software encode (aiortc)   -- in process, only without ffmpeg
         Flat priority ladder: the first path that works wins. Returns a
         player (MediaPlayer-shaped: .video/.stop) or None for HTTP-only.
         """
@@ -111,6 +112,9 @@ class OctoPrintBitBang(BitBangASGI):
                 V4l2H264Track, device_supports_h264, device_supports_flip,
                 has_v4l2m2m_h264_encoder, find_vaapi_device, reencode_input_format)
 
+            # Needed by every re-encoding rung, hardware or software.
+            in_fmt = reencode_input_format(device)
+
             if encoder_pref != "software":
                 source_is_h264 = device_supports_h264(device)
 
@@ -125,8 +129,6 @@ class OctoPrintBitBang(BitBangASGI):
                         f"Opened {device} via built-in H.264 encoder "
                         f"(hardware passthrough{', hw flip' if need_flip else ''})")
                     return player
-
-                in_fmt = reencode_input_format(device)
 
                 # 3. raw source + Pi 4 hardware M2M encoder -> GPU re-encode
                 #    (flip via ffmpeg filter, so no device flip controls needed).
@@ -154,12 +156,34 @@ class OctoPrintBitBang(BitBangASGI):
                             f"Opened {device} via h264_vaapi hardware encoder on {vaapi_dev} "
                             f"(GPU re-encode from {in_fmt}{', hwaccel decode' if hwaccel_dec else ''}{', flip' if need_flip else ''})")
                         return player
+            # 5. software encode, but in the ffmpeg child rather than in
+            #    process -- Pi 5, any host where no hardware rung applied, and
+            #    an explicit encoder=software. Outside the branch above on
+            #    purpose: asking for software must still get this rung, not
+            #    the in-process one below it.
+            #
+            #    Going through the same class is what gives the software path a
+            #    supervisor. When a V4L2 device vanishes mid-stream, libav's
+            #    capture thread can wedge in the kernel still holding the
+            #    device, and only a child process can be killed out of that.
+            player = V4l2H264Track(device, source_is_h264=False,
+                                   encoder="libx264",
+                                   input_format=in_fmt, **common)
+            self._logger.info(
+                f"Opened {device} via libx264 (software encode"
+                f"{f' from {in_fmt}' if in_fmt else ''}"
+                f"{', flip' if need_flip else ''})")
+            return player
         except Exception as e:
             self._logger.warning(
-                f"Hardware H.264 path unavailable on {device} ({e}); "
-                f"using software encode")
+                f"ffmpeg capture unavailable on {device} ({e}); "
+                f"falling back to in-process software encode")
 
-        # 5. software encode (aiortc) -- last resort (e.g. Pi 5, raw USB cam)
+        # 6. software encode in process (aiortc) -- genuinely last, reached
+        #    only when there is no ffmpeg to do it in a child. Unsupervised:
+        #    a capture that dies here cannot be reopened, because the libav
+        #    thread that failed may be wedged in the kernel still holding the
+        #    device. That is the whole reason rung 5 exists above it.
         try:
             from .usb_camera_source import UsbCameraSource
             player = UsbCameraSource(

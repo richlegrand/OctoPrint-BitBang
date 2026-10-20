@@ -438,8 +438,12 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
                 ]
             else:
                 cmd += ["-vaapi_device", self._vaapi_device]
+        cmd += ["-f", "v4l2"]
+        # A device that advertises neither MJPEG nor YUYV has no format we can
+        # name, which is the software rung's business: let ffmpeg pick.
+        if self._input_format:
+            cmd += ["-input_format", self._input_format]
         cmd += [
-            "-f", "v4l2", "-input_format", self._input_format,
             "-video_size", self._video_size, "-framerate", str(self._framerate),
             "-i", self.device, "-an",
         ]
@@ -461,6 +465,26 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
                         "-c:v", "h264_vaapi",
                         "-b:v", str(self._bitrate), "-g", str(self._gop),
                         "-bf", "0"]
+        elif self._encoder == "libx264":
+            # Software encode in the ffmpeg child rather than in-process.
+            # Speed is not the point -- isolation is. When a V4L2 device
+            # disappears mid-stream, libav's capture thread can wedge in the
+            # kernel's vb2_core_dqbuf and never return: no frame, no error,
+            # and it keeps the device open. In a child that is a SIGKILL; in
+            # OctoPrint's own process there is no way out of it.
+            #
+            # ultrafast/zerolatency because anything slower cannot hold frame
+            # rate on a Pi, and baseline because that is what the browser
+            # wants and what the other paths already produce.
+            vf = [f for f, on in (("hflip", self._flip_h),
+                                  ("vflip", self._flip_v)) if on]
+            vf.append("format=yuv420p")
+            cmd += ["-vf", ",".join(vf),
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast", "-tune", "zerolatency",
+                    "-profile:v", "baseline",
+                    "-b:v", str(self._bitrate), "-g", str(self._gop),
+                    "-bf", "0"]
         else:
             # h264_v4l2m2m requires yuv420p input; MJPEG/YUYV decode to other
             # pixel formats, so always convert (and apply any flip in the same

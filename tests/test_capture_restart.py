@@ -99,6 +99,9 @@ class TestReopenPolicy(unittest.TestCase):
         track._loop = _Loop()
         track._close_proc = lambda: None
         track._log_failure = lambda reason, ran: None
+        # The give-up path reports contention too; a policy test should not
+        # depend on what this host's /proc looks like.
+        track._log_contention = lambda: None
         it = iter(durations)
         attempts = []
 
@@ -226,6 +229,24 @@ class TestContentionReporting(unittest.TestCase):
              patch.object(src, "running_streamers", return_value=[]):
             t._log_contention()
         self.assertEqual(rec.lines, [])
+
+    def test_device_holders_survives_an_unreadable_fd_link(self):
+        """Listing a process's fds does not mean every link can be read.
+
+        This runs from the capture thread's failure path, so a raise here
+        would kill the thread without failing the track, leaving recv()
+        waiting for a packet that never comes."""
+        def fake_listdir(path):
+            return ["123"] if path == "/proc" else ["0", "1"]
+
+        def fake_realpath(path):
+            if path.endswith("/fd/0"):
+                raise PermissionError(13, "Permission denied")
+            return path
+
+        with patch.object(src.os, "listdir", side_effect=fake_listdir), \
+             patch.object(src.os.path, "realpath", side_effect=fake_realpath):
+            self.assertEqual(src.device_holders("/dev/video0"), [])
 
     def test_running_streamers_reads_comm_not_fd(self):
         """comm is world-readable where fd is not, which is the whole point."""

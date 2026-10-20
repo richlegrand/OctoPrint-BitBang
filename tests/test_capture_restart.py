@@ -9,6 +9,7 @@ The clock is faked so a "ran for an hour" case costs no wall time, and the
 backoff and device wait are patched to zero so only the policy is measured.
 """
 
+import io
 import unittest
 from unittest.mock import patch
 
@@ -173,6 +174,138 @@ class TestWaitForDevice(unittest.TestCase):
         t._stop.set()
         with patch("os.path.exists", return_value=False):
             self.assertFalse(t._wait_for_device(timeout=10.0))
+
+
+class _Recorder:
+    """Collects log lines so a test can assert on what was actually said."""
+
+    def __init__(self):
+        self.lines = []
+
+    def _add(self, msg):
+        self.lines.append(msg)
+
+    warning = info = error = debug = _add
+
+    def text(self):
+        return "\n".join(self.lines)
+
+
+class TestContentionReporting(unittest.TestCase):
+    """Who has the camera, when our own scan cannot see them.
+
+    /proc/<pid>/fd is readable only for our own processes, so a streamer
+    running as root -- OctoPi's webcamd, the usual culprit -- never shows up
+    in device_holders. An empty result there is not "nobody has it"."""
+
+    def test_names_a_running_streamer_when_our_scan_is_blind(self):
+        t = _track()
+        t._logger = rec = _Recorder()
+        with patch.object(src, "device_holders", return_value=[]), \
+             patch.object(src, "running_streamers",
+                          return_value=["pid 619 (mjpg_streamer)"]):
+            t._log_contention()
+        self.assertIn("mjpg_streamer", rec.text())
+        self.assertIn("systemctl disable", rec.text())
+
+    def test_prefers_a_holder_we_can_actually_see(self):
+        t = _track()
+        t._logger = rec = _Recorder()
+        with patch.object(src, "device_holders",
+                          return_value=["pid 42 (python3)"]), \
+             patch.object(src, "running_streamers",
+                          return_value=["pid 619 (mjpg_streamer)"]) as streamers:
+            t._log_contention()
+        self.assertIn("pid 42 (python3)", rec.text())
+        streamers.assert_not_called()
+
+    def test_stays_quiet_when_there_is_nothing_to_report(self):
+        t = _track()
+        t._logger = rec = _Recorder()
+        with patch.object(src, "device_holders", return_value=[]), \
+             patch.object(src, "running_streamers", return_value=[]):
+            t._log_contention()
+        self.assertEqual(rec.lines, [])
+
+    def test_running_streamers_reads_comm_not_fd(self):
+        """comm is world-readable where fd is not, which is the whole point."""
+        def fake_open(path, *a, **k):
+            if path == "/proc/619/comm":
+                return io.StringIO("mjpg_streamer\n")
+            if path == "/proc/1/comm":
+                return io.StringIO("systemd\n")
+            raise OSError("not ours")
+
+        with patch.object(src.os, "listdir",
+                          return_value=["1", "619", "self", "cpuinfo"]), \
+             patch("builtins.open", side_effect=fake_open):
+            self.assertEqual(src.running_streamers(),
+                             ["pid 619 (mjpg_streamer)"])
+
+
+class TestRepeatFailureLogging(unittest.TestCase):
+    """A repeat failure keeps its ffmpeg output when the output is new.
+
+    The first failure of an episode is often the least informative: a killed
+    process prints nothing, and it is the reopen that says "Device or resource
+    busy". Suppressing every repeat throws that away."""
+
+    def setUp(self):
+        self.clock = _Clock()
+        self.patches = [
+            patch.object(src, "time", self.clock),
+            patch.object(src, "_REOPEN_BACKOFF", (0.0,) * 5),
+            patch.object(src, "_DEVICE_WAIT", 0.0),
+            patch("os.path.exists", return_value=True),
+        ]
+        for p in self.patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in self.patches])
+
+    def _run(self, tails):
+        """Drive _capture_loop, giving each attempt the next stderr tail.
+        Every run dies immediately, so the loop walks its failure budget."""
+        t = _track()
+        t._logger = rec = _Recorder()
+        t._loop = _Loop()
+        t._close_proc = lambda: None
+        it = iter(tails)
+
+        def run_once():
+            try:
+                tail = next(it)
+            except StopIteration:
+                t._stop.set()
+                return None
+            t._stderr_tail.clear()
+            t._stderr_tail.extend(tail)
+            self.clock.t += 0.2
+            return "ffmpeg exited (rc=1)"
+
+        t._run_once = run_once
+        with patch.object(src, "device_holders", return_value=[]), \
+             patch.object(src, "running_streamers", return_value=[]):
+            t._capture_loop()
+        return rec
+
+    def test_a_new_error_on_a_repeat_is_printed(self):
+        # Killed first (says nothing), then the reopen reports the real cause.
+        rec = self._run([[], ["Device or resource busy"], []])
+        self.assertIn("Device or resource busy", rec.text())
+
+    def test_an_identical_error_is_not_reprinted(self):
+        busy = ["Device or resource busy"]
+        rec = self._run([busy, busy, busy, busy, busy])
+        printed = [l for l in rec.lines if "ffmpeg: Device or resource busy" in l]
+        self.assertEqual(len(printed), 1,
+                         f"printed {len(printed)} times:\n{rec.text()}")
+
+    def test_each_distinct_error_is_printed_once(self):
+        rec = self._run([["first problem"], ["first problem"],
+                         ["second problem"], ["second problem"]])
+        out = rec.text()
+        self.assertEqual(out.count("ffmpeg: first problem"), 1, out)
+        self.assertEqual(out.count("ffmpeg: second problem"), 1, out)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 """Reopening a V4L2 capture after the camera drops off.
 
-The policy under test is in V4l2H264Track._capture_loop: a run that lasted
-past _RUN_ESTABLISHED is a disconnect and gets retried indefinitely, while
-runs that end immediately are a configuration that cannot work and give up
-after _MAX_FAILED_STARTS. See issue #6.
+The policy under test is CaptureSupervisor._capture_loop, which V4l2H264Track
+mixes in: a run that lasted past _RUN_ESTABLISHED is a disconnect and gets
+retried indefinitely, while runs that end immediately are a configuration that
+cannot work and give up after _MAX_FAILED_STARTS. See issue #6.
 
 The clock is faked so a "ran for an hour" case costs no wall time, and the
 backoff and device wait are patched to zero so only the policy is measured.
@@ -13,6 +13,7 @@ import io
 import unittest
 from unittest.mock import patch
 
+from octoprint_bitbang import capture_supervisor as sup
 from octoprint_bitbang import v4l2_h264_source as src
 from octoprint_bitbang.v4l2_h264_source import V4l2H264Track
 
@@ -84,9 +85,10 @@ class TestReopenPolicy(unittest.TestCase):
     def setUp(self):
         self.clock = _Clock()
         self.patches = [
-            patch.object(src, "time", self.clock),
-            patch.object(src, "_REOPEN_BACKOFF", (0.0,) * 5),
-            patch.object(src, "_DEVICE_WAIT", 0.0),
+            # The loop and its policy live in capture_supervisor now; only the
+            # device wait is still the V4L2 source's own.
+            patch.object(sup, "time", self.clock),
+            patch.object(sup, "_REOPEN_BACKOFF", (0.0,) * 5),
             patch("os.path.exists", return_value=True),
         ]
         for p in self.patches:
@@ -130,7 +132,7 @@ class TestReopenPolicy(unittest.TestCase):
         # Every run dies immediately: a device that is gone, or an encoder this
         # machine does not have.
         attempts, calls = self._run(t, [0.2] * 20)
-        self.assertEqual(len(attempts), src._MAX_FAILED_STARTS)
+        self.assertEqual(len(attempts), sup._MAX_FAILED_STARTS)
         self.assertEqual(len(calls), 1, "should fail the track exactly once")
         self.assertEqual(calls[0][0].__func__, V4l2H264Track._fail)
         self.assertIsInstance(calls[0][1][0], RuntimeError)
@@ -274,9 +276,10 @@ class TestRepeatFailureLogging(unittest.TestCase):
     def setUp(self):
         self.clock = _Clock()
         self.patches = [
-            patch.object(src, "time", self.clock),
-            patch.object(src, "_REOPEN_BACKOFF", (0.0,) * 5),
-            patch.object(src, "_DEVICE_WAIT", 0.0),
+            # The loop and its policy live in capture_supervisor now; only the
+            # device wait is still the V4L2 source's own.
+            patch.object(sup, "time", self.clock),
+            patch.object(sup, "_REOPEN_BACKOFF", (0.0,) * 5),
             patch("os.path.exists", return_value=True),
         ]
         for p in self.patches:

@@ -85,7 +85,16 @@ def device_holders(device):
         except OSError:
             continue  # another user's process, or it exited mid-scan
         for fd in fds:
-            if os.path.realpath(os.path.join(fd_dir, fd)) != target:
+            try:
+                same = os.path.realpath(os.path.join(fd_dir, fd)) == target
+            except OSError:
+                # Listing a process's fds does not guarantee every link is
+                # readable, and one can vanish mid-scan. This runs from the
+                # capture thread's failure path, where raising would kill the
+                # thread without failing the track and leave recv() waiting
+                # for a packet that never comes.
+                continue
+            if not same:
                 continue
             try:
                 with open(os.path.join("/proc", pid, "comm")) as f:

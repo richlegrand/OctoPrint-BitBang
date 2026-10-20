@@ -35,6 +35,8 @@ from fractions import Fraction
 import av
 from aiortc import MediaStreamTrack
 
+from .capture_supervisor import CaptureSupervisor
+
 _log = logging.getLogger(__name__)
 
 # av.Packet timestamps use a monotonic microsecond clock; aiortc only needs
@@ -45,20 +47,11 @@ _TIME_BASE = Fraction(1, 1_000_000)
 _VUI_BSF = ("h264_metadata=video_full_range_flag=1:"
             "matrix_coefficients=1:colour_primaries=1:transfer_characteristics=1")
 
-# Reopening policy for a capture that ended on its own.
-#
-# The decision is how long the run lasted, not how many attempts have been
-# made. A capture that ran for hours and then stopped is a camera that
-# disconnected, and it will very likely come back; retrying that indefinitely
-# is right. A capture that ends within seconds, again and again, is a
-# configuration that cannot work -- a missing device, an encoder the GPU does
-# not have, another process holding the camera -- and retrying it forever only
-# hides the problem. So a run that lasts past _RUN_ESTABLISHED clears the
-# count, which means a camera that drops once a day never exhausts its budget.
-_RUN_ESTABLISHED = 10.0      # seconds; past this, the capture really started
-_MAX_FAILED_STARTS = 5       # consecutive sub-_RUN_ESTABLISHED runs before stopping
-_REOPEN_BACKOFF = (1.0, 2.0, 5.0, 10.0, 15.0)
-_DEVICE_WAIT = 30.0          # seconds to wait for the device node to reappear
+# How long to wait for the device node to reappear before reopening anyway.
+# The rest of the reopen policy -- when a run counts as established, the
+# failed-start budget, the backoff -- lives in capture_supervisor, shared with
+# the other capture sources.
+_DEVICE_WAIT = 30.0
 
 def device_holders(device):
     """Best-effort list of "pid NAME" strings for processes holding `device`
@@ -296,7 +289,7 @@ def find_vaapi_device(explicit_device=None, video_size="1280x720"):
     return None
 
 
-class V4l2H264Track(MediaStreamTrack):
+class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
     """aiortc video track backed by a V4L2 device's built-in H.264 encoder.
 
     A background thread runs `ffmpeg` (capture + VUI fix) and demuxes its output
@@ -558,7 +551,8 @@ class V4l2H264Track(MediaStreamTrack):
             f"{ran_seconds:.1f}s: {reason}")
         for line in self._stderr_tail:
             self._logger.warning(f"BitBang:   ffmpeg: {line}")
-        self._log_contention()
+        # Contention is reported by the supervisor, which calls it after this
+        # and again on the give-up path.
 
     def _log_contention(self):
         """Say who else has the camera, as far as we can tell.
@@ -603,77 +597,32 @@ class V4l2H264Track(MediaStreamTrack):
             self._stop.wait(0.5)
         return False
 
-    def _capture_loop(self):
-        """Run the capture, reopening the device when it ends on its own.
+    # -- CaptureSupervisor hooks --
+    #
+    # The loop itself is in capture_supervisor, shared with the other sources.
+    # These say what "one capture" and "the source might work again" mean for a
+    # V4L2 device, and hand it the reporting this class already had.
 
-        Gives up only when reopening keeps failing straight away -- see the
-        policy constants. Until then the track stays alive and `recv()` simply
-        waits, so a camera that drops off USB shows up as a stall rather than
-        video that never comes back."""
-        failed_starts = 0
-        reported_tail = []
-        while not self._stop.is_set():
-            started = time.monotonic()
-            try:
-                reason = self._run_once()
-            except Exception as e:  # noqa: BLE001 - reported, then maybe surfaced
-                reason = str(e) or e.__class__.__name__
-            finally:
-                self._close_proc()
-            if self._stop.is_set() or reason is None:
-                return
+    @property
+    def _source_name(self):
+        return self.device
 
-            ran = time.monotonic() - started
-            if ran >= _RUN_ESTABLISHED:
-                failed_starts = 0
-            else:
-                failed_starts += 1
+    def _wait_for_source(self):
+        return self._wait_for_device()
 
-            # The first failure of an episode gets the whole story -- ffmpeg's
-            # stderr and whoever else holds the device. Repeats get one line,
-            # so a camera that drops daily does not fill the journal.
-            tail = list(self._stderr_tail)
-            if failed_starts <= 1:
-                self._log_failure(reason, ran)
-                reported_tail = tail
-            else:
-                self._logger.warning(
-                    f"BitBang: capture on {self.device} failed again after "
-                    f"{ran:.1f}s ({failed_starts}/{_MAX_FAILED_STARTS}): "
-                    f"{reason}")
-                # ...unless the repeat has something new to say. The first
-                # failure of an episode is often the least informative one:
-                # a process that was killed prints nothing, and it is the
-                # reopen that reports "Device or resource busy". Printing a
-                # tail we have not printed yet costs one block per distinct
-                # error rather than one per attempt.
-                if tail and tail != reported_tail:
-                    for line in tail:
-                        self._logger.warning(f"BitBang:   ffmpeg: {line}")
-                    reported_tail = tail
+    def _cleanup_capture(self):
+        self._close_proc()
 
-            if failed_starts >= _MAX_FAILED_STARTS:
-                self._logger.error(
-                    f"BitBang: giving up on {self.device} after "
-                    f"{_MAX_FAILED_STARTS} failed starts -- the camera is gone, "
-                    f"in use, or configured in a way this machine cannot run")
-                # Ask again here rather than relying on the first failure's
-                # report: whoever took the device may have taken it after that.
-                self._log_contention()
-                self._loop.call_soon_threadsafe(
-                    self._fail,
-                    RuntimeError(
-                        f"V4L2 capture on {self.device} failed: {reason}"))
-                return
+    def _report_failure(self, reason, ran_seconds):
+        self._log_failure(reason, ran_seconds)
 
-            if not self._wait_for_device():
-                self._logger.warning(
-                    f"BitBang: {self.device} has not come back after "
-                    f"{_DEVICE_WAIT:.0f}s; still trying")
-            delay = _REOPEN_BACKOFF[min(failed_starts, len(_REOPEN_BACKOFF) - 1)]
-            if self._stop.wait(delay):
-                return
-            self._logger.info(f"BitBang: reopening {self.device}")
+    def _report_contention(self):
+        self._log_contention()
+
+    def _capture_tail(self):
+        # Prefixed, because the supervisor prints these for any source and
+        # "ffmpeg:" is only true of this one.
+        return [f"ffmpeg: {line}" for line in self._stderr_tail]
 
     def _enqueue(self, pkt):
         if self._queue.full():

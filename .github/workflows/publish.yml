@@ -90,8 +90,14 @@ jobs:
       # PyPI is best-effort (Plugin Manager can't install from a bare PyPI
       # package anyway). continue-on-error so a PyPI hiccup doesn't fail the
       # release or skip the asset attach above.
+      #
+      # Prereleases stop here. GitHub fires release:published for a prerelease
+      # too, so without this a test build would upload -- and PyPI accepts a
+      # version once, so a bad rc would burn the number for good. The asset
+      # attach above deliberately still runs, because release.zip is the whole
+      # point of a test build: Plugin Manager installs it from the URL.
       - name: Publish to PyPI
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' && !github.event.release.prerelease
         continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

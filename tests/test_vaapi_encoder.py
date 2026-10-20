@@ -220,6 +220,45 @@ class TestVaapiEncoder(unittest.TestCase):
         self.assertEqual(cmd[idx_vf + 1], "hflip,format=nv12,hwupload")
 
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_v4l2_h264_track_cmd_libx264(self, mock_which):
+        """Software encode goes through ffmpeg, so it gets the supervisor.
+
+        ultrafast/zerolatency is not a nicety: the default preset cannot hold
+        frame rate on a Pi."""
+        track = V4l2H264Track(
+            device="/dev/video0",
+            source_is_h264=False,
+            encoder="libx264",
+            input_format="mjpeg",
+            video_size="640x480",
+        )
+        cmd = track._ffmpeg_cmd()
+        idx = cmd.index("-c:v")
+        self.assertEqual(cmd[idx + 1], "libx264")
+        self.assertEqual(cmd[cmd.index("-preset") + 1], "ultrafast")
+        self.assertEqual(cmd[cmd.index("-tune") + 1], "zerolatency")
+        self.assertEqual(cmd[cmd.index("-profile:v") + 1], "baseline")
+        self.assertEqual(cmd[cmd.index("-vf") + 1], "format=yuv420p")
+        # Re-encoders need the parameter sets re-inserted or a browser that
+        # joins mid-stream renders black.
+        self.assertIn("dump_extra=freq=keyframe", " ".join(cmd))
+
+    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_v4l2_h264_track_cmd_without_an_input_format(self, mock_which):
+        """A device advertising neither MJPEG nor YUYV names no format, which
+        is the software rung's case: let ffmpeg pick rather than pass None."""
+        track = V4l2H264Track(
+            device="/dev/video0",
+            source_is_h264=False,
+            encoder="libx264",
+            input_format=None,
+        )
+        cmd = track._ffmpeg_cmd()
+        self.assertNotIn("-input_format", cmd)
+        self.assertNotIn(None, cmd)
+        self.assertEqual(cmd[cmd.index("-i") + 1], "/dev/video0")
+
+    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
     def test_v4l2_h264_track_cmd_v4l2m2m(self, mock_which):
         track = V4l2H264Track(
             device="/dev/video0",
@@ -305,11 +344,51 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
     @patch("octoprint_bitbang.v4l2_h264_source.has_v4l2m2m_h264_encoder", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.device_supports_h264", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.find_vaapi_device", return_value=None)
-    # UsbCameraSource opens the device in __init__ via aiortc's MediaPlayer, so
-    # without this the software rungs of the ladder can only be tested on a
-    # machine that has a camera. They pass on a dev box and fail on CI.
+    @patch.object(V4l2H264Track, "_query_brightness_range", return_value=None)
+    def test_adapter_falls_back_to_software_when_no_hw_encoder(self, mock_bright, mock_vaapi_dev, mock_h264, mock_m2m, mock_fmt, mock_which):
+        from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
+
+        async def _app(scope, receive, send):
+            pass
+
+        source = {
+            "type": "usb",
+            "device": "/dev/video0",
+            "format": "v4l2",
+            "encoder": "auto",
+        }
+        adapter = OctoPrintBitBang(_app, camera_source=source, ephemeral=True)
+        self.assertIsNotNone(adapter.player)
+        # Software encode runs in an ffmpeg child now, not in process, so it
+        # gets the same supervisor as the hardware rungs.
+        self.assertIsInstance(adapter.player, V4l2H264Track)
+        self.assertEqual(adapter.player._encoder, "libx264")
+
+    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("octoprint_bitbang.v4l2_h264_source.reencode_input_format", return_value="mjpeg")
+    @patch.object(V4l2H264Track, "_query_brightness_range", return_value=None)
+    def test_adapter_software_pref_skips_hardware(self, mock_bright, mock_fmt, mock_which):
+        from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
+
+        async def _app(scope, receive, send):
+            pass
+
+        source = {
+            "type": "usb",
+            "device": "/dev/video0",
+            "format": "v4l2",
+            "encoder": "software",
+        }
+        adapter = OctoPrintBitBang(_app, camera_source=source, ephemeral=True)
+        self.assertIsNotNone(adapter.player)
+        self.assertIsInstance(adapter.player, V4l2H264Track)
+        self.assertEqual(adapter.player._encoder, "libx264")
+
+    # Without ffmpeg there is no child to encode in, so the in-process aiortc
+    # path is the only thing left -- unsupervised, which is why it is last.
+    @patch("shutil.which", return_value=None)
     @patch("octoprint_bitbang.usb_camera_source.MediaPlayer")
-    def test_adapter_falls_back_to_software_when_no_hw_encoder(self, mock_player, mock_vaapi_dev, mock_h264, mock_m2m, mock_fmt, mock_which):
+    def test_adapter_uses_in_process_encode_without_ffmpeg(self, mock_player, mock_which):
         from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
         from octoprint_bitbang.usb_camera_source import UsbCameraSource
 
@@ -325,28 +404,6 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
             "encoder": "auto",
         }
         adapter = OctoPrintBitBang(_app, camera_source=source, ephemeral=True)
-        self.assertIsNotNone(adapter.player)
-        self.assertIsInstance(adapter.player, UsbCameraSource)
-
-    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
-    @patch("octoprint_bitbang.usb_camera_source.MediaPlayer")
-    def test_adapter_software_pref_skips_hardware(self, mock_player, mock_which):
-        from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
-        from octoprint_bitbang.usb_camera_source import UsbCameraSource
-
-        mock_player.return_value = MagicMock(video=MagicMock())
-
-        async def _app(scope, receive, send):
-            pass
-
-        source = {
-            "type": "usb",
-            "device": "/dev/video0",
-            "format": "v4l2",
-            "encoder": "software",
-        }
-        adapter = OctoPrintBitBang(_app, camera_source=source, ephemeral=True)
-        self.assertIsNotNone(adapter.player)
         self.assertIsInstance(adapter.player, UsbCameraSource)
 
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")

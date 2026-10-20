@@ -164,8 +164,7 @@ class OctoPrintBitBang(BitBangASGI):
             from .usb_camera_source import UsbCameraSource
             player = UsbCameraSource(
                 device=device, format=source.get("format"), options=opts,
-                brightness=brightness, flip_horizontal=flip_h,
-                flip_vertical=flip_v, logger=self._logger)
+                brightness=brightness, flip_horizontal=flip_h, flip_vertical=flip_v)
             self._logger.info(f"Opened USB camera (software encode): {device}")
             return player
         except Exception as e:

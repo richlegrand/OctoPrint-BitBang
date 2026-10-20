@@ -87,12 +87,20 @@ class TestVaapiEncoder(unittest.TestCase):
         mock_run.return_value = MagicMock(returncode=1)
         self.assertFalse(probe_vaapi_h264("/dev/dri/renderD128"))
 
+    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("subprocess.run")
+    def test_probe_vaapi_h264_uses_video_size(self, mock_run, mock_which):
+        mock_run.return_value = MagicMock(returncode=0)
+        self.assertTrue(probe_vaapi_h264("/dev/dri/renderD128", video_size="1920x1080"))
+        args, _ = mock_run.call_args
+        self.assertIn("testsrc=s=1920x1080:r=1", args[0])
+
     @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_h264", return_value=True)
     @patch("octoprint_bitbang.v4l2_h264_source.has_vaapi_h264_encoder", return_value=True)
     def test_find_vaapi_device_explicit(self, mock_has, mock_probe):
         dev = find_vaapi_device("/dev/dri/renderD129")
         self.assertEqual(dev, "/dev/dri/renderD129")
-        mock_probe.assert_called_once_with("/dev/dri/renderD129")
+        mock_probe.assert_called_once_with("/dev/dri/renderD129", video_size="1280x720")
 
     @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_h264", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.has_vaapi_h264_encoder", return_value=True)
@@ -105,10 +113,10 @@ class TestVaapiEncoder(unittest.TestCase):
     def test_find_vaapi_device_autodetect_renderD128(self, mock_exists, mock_has, mock_probe):
         dev = find_vaapi_device()
         self.assertEqual(dev, "/dev/dri/renderD128")
-        mock_probe.assert_called_once_with("/dev/dri/renderD128")
+        mock_probe.assert_called_once_with("/dev/dri/renderD128", video_size="1280x720")
 
     @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_h264",
-           side_effect=lambda p: p == "/dev/dri/renderD129")
+           side_effect=lambda p, **kw: p == "/dev/dri/renderD129")
     @patch("octoprint_bitbang.v4l2_h264_source.has_vaapi_h264_encoder", return_value=True)
     @patch("glob.glob", return_value=["/dev/dri/renderD128", "/dev/dri/renderD129"])
     @patch("os.path.exists", return_value=True)
@@ -358,12 +366,14 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
             "format": "v4l2",
             "encoder": "vaapi",
             "vaapi_device": "/dev/dri/renderD129",
+            "options": {"video_size": "1920x1080"},
         }
         adapter = OctoPrintBitBang(_app, camera_source=source, ephemeral=True)
         self.assertIsNotNone(adapter.player)
         self.assertIsInstance(adapter.player, V4l2H264Track)
         self.assertEqual(adapter.player._encoder, "vaapi")
         self.assertEqual(adapter.player._vaapi_device, "/dev/dri/renderD129")
+        mock_vaapi_dev.assert_called_once_with("/dev/dri/renderD129", video_size="1920x1080")
 
 
 if __name__ == "__main__":

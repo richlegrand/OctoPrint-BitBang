@@ -309,8 +309,11 @@ class BitBangPlugin(
 
         # Stale Go proxies (orphaned by a prior OctoPrint restart) would
         # re-register our shared UID and conflict — kill them first. Match on
-        # args (path-independent); pkill never matches its own pid.
-        subprocess.run(["pkill", "-f", "serve proxy -program octoprint"], check=False)
+        # args (path-independent); pkill never matches its own pid. The target
+        # now sits between "proxy" and the flags, so the two halves are no
+        # longer adjacent -- pkill -f takes a regex, so bridge them rather than
+        # matching a literal that a later argv change can silently break.
+        subprocess.run(["pkill", "-f", "serve proxy .*-program octoprint"], check=False)
 
         self._go_stop = False
         threading.Thread(
@@ -344,17 +347,18 @@ class BitBangPlugin(
                 logf = open(log_path, "a", buffering=1)
             except Exception:
                 logf = subprocess.DEVNULL
-            # Go shares our identity (-program) → one URL; -target serves
-            # OctoPrint directly on the plain device URL.
-            args = [go_bin, "serve", "proxy", "-program", "octoprint",
-                    "-target", f"localhost:{port}", "-v", "-video-fd", str(child.fileno()),
+            # Go shares our identity (-program) → one URL; the positional
+            # target serves OctoPrint directly on the plain device URL.
+            args = [go_bin, "serve", "proxy", f"localhost:{port}",
+                    "-program", "octoprint",
+                    "-v", "-video-fd", str(child.fileno()),
                     # Always stamp the real browser IP as X-Forwarded-For — standard
                     # reverse-proxy behavior. Without it OctoPrint sees every request
                     # as coming from localhost, which (with autologinLocal) would
                     # auto-log-in a remote visitor. OctoPrint shows a one-time,
                     # per-browser "external access" notice as a result, which is
                     # accurate (the visitor IS external).
-                    "-forward-client-ip"]
+                    "-proxy-client-ip"]
             # The Go proxy owns the data channel + signaling, so it's what must
             # enforce the PIN — passing it to the Python adapter does nothing now.
             pin = (self._settings.get(["pin"]) or "").strip()

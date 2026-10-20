@@ -297,9 +297,15 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
     @patch("octoprint_bitbang.v4l2_h264_source.has_v4l2m2m_h264_encoder", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.device_supports_h264", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.find_vaapi_device", return_value=None)
-    def test_adapter_falls_back_to_software_when_no_hw_encoder(self, mock_vaapi_dev, mock_h264, mock_m2m, mock_fmt, mock_which):
+    # UsbCameraSource opens the device in __init__ via aiortc's MediaPlayer, so
+    # without this the software rungs of the ladder can only be tested on a
+    # machine that has a camera. They pass on a dev box and fail on CI.
+    @patch("octoprint_bitbang.usb_camera_source.MediaPlayer")
+    def test_adapter_falls_back_to_software_when_no_hw_encoder(self, mock_player, mock_vaapi_dev, mock_h264, mock_m2m, mock_fmt, mock_which):
         from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
         from octoprint_bitbang.usb_camera_source import UsbCameraSource
+
+        mock_player.return_value = MagicMock(video=MagicMock())
 
         async def _app(scope, receive, send):
             pass
@@ -315,9 +321,12 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
         self.assertIsInstance(adapter.player, UsbCameraSource)
 
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")
-    def test_adapter_software_pref_skips_hardware(self, mock_which):
+    @patch("octoprint_bitbang.usb_camera_source.MediaPlayer")
+    def test_adapter_software_pref_skips_hardware(self, mock_player, mock_which):
         from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
         from octoprint_bitbang.usb_camera_source import UsbCameraSource
+
+        mock_player.return_value = MagicMock(video=MagicMock())
 
         async def _app(scope, receive, send):
             pass

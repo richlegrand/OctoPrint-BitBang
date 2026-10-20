@@ -142,7 +142,7 @@ class OctoPrintBitBang(BitBangASGI):
                 # 4. raw source + VAAPI hardware encoder -> GPU re-encode
                 #    (Intel/AMD/generic PC, flip via ffmpeg filter).
                 if encoder_pref in ("auto", "vaapi") and in_fmt:
-                    vaapi_dev = find_vaapi_device(vaapi_dev_pref)
+                    vaapi_dev = find_vaapi_device(vaapi_dev_pref, video_size=common["video_size"])
                     if vaapi_dev:
                         hwaccel_dec = bool(source.get("vaapi_hwaccel_decode", False))
                         player = V4l2H264Track(device, source_is_h264=source_is_h264,

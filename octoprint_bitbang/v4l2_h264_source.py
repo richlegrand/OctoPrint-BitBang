@@ -261,7 +261,7 @@ def has_vaapi_h264_encoder(device=None):
         return False
 
 
-def probe_vaapi_h264(device_path):
+def probe_vaapi_h264(device_path, video_size="1280x720"):
     """Test whether ffmpeg can actually encode a test frame with h264_vaapi
     using the specified VAAPI device."""
     if not shutil.which("ffmpeg"):
@@ -269,7 +269,7 @@ def probe_vaapi_h264(device_path):
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-vaapi_device", device_path,
-        "-f", "lavfi", "-i", "testsrc=s=64x64:r=1",
+        "-f", "lavfi", "-i", f"testsrc=s={video_size}:r=1",
         "-frames:v", "1",
         "-vf", "format=nv12,hwupload",
         "-c:v", "h264_vaapi",
@@ -282,16 +282,16 @@ def probe_vaapi_h264(device_path):
         return False
 
 
-def find_vaapi_device(explicit_device=None):
+def find_vaapi_device(explicit_device=None, video_size="1280x720"):
     """Find a render node whose driver can actually encode H.264."""
     import glob
     if not has_vaapi_h264_encoder():
         return None
     if explicit_device:
-        return explicit_device if probe_vaapi_h264(explicit_device) else None
+        return explicit_device if probe_vaapi_h264(explicit_device, video_size=video_size) else None
     nodes = ["/dev/dri/renderD128"] + sorted(glob.glob("/dev/dri/renderD*"))
     for node in dict.fromkeys(nodes):
-        if os.path.exists(node) and probe_vaapi_h264(node):
+        if os.path.exists(node) and probe_vaapi_h264(node, video_size=video_size):
             return node
     return None
 

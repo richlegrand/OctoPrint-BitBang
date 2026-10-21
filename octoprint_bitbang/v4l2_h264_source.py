@@ -421,8 +421,9 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
         cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer",
         ]
-        # Hardware decode is applicable for VAAPI when input is MJPEG and no
-        # software orientation filters (flip) are requested.
+        # Hardware decode is applicable for VAAPI when the input is MJPEG.
+        # A flip no longer rules it out: transpose_vaapi does the flip on the
+        # VAAPI filter graph, so it no longer forces a software decode.
         use_hwaccel_decode = (
             self._encoder == "vaapi" and
             self._hwaccel_decode and
@@ -435,9 +436,7 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
                     "-hwaccel_device", self._vaapi_device,
                     "-hwaccel_output_format", "vaapi",
                 ]
-                
             cmd += ["-vaapi_device", self._vaapi_device]
-            
         cmd += ["-f", "v4l2"]
         # A device that advertises neither MJPEG nor YUYV has no format we can
         # name, which is the software rung's business: let ffmpeg pick.
@@ -452,10 +451,9 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
         elif self._encoder == "vaapi":
             if use_hwaccel_decode:
                 vf = ["scale_vaapi=format=nv12"]
-                
-                vf.extend([f for f, on in (("transpose_vaapi=dir=hflip", self._flip_h),
-                                      ("transpose_vaapi=dir=vflip", self._flip_v)) if on])
-                                      
+                vf.extend([f for f, on in
+                           (("transpose_vaapi=dir=hflip", self._flip_h),
+                            ("transpose_vaapi=dir=vflip", self._flip_v)) if on])
                 # Frames decoded directly into VAAPI surfaces; encode directly.
                 cmd += ["-vf", ",".join(vf),
                         "-c:v", "h264_vaapi",

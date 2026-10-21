@@ -191,16 +191,21 @@ class TestVaapiEncoder(unittest.TestCase):
         self.assertIn("-hwaccel_output_format", cmd)
         idx_out = cmd.index("-hwaccel_output_format")
         self.assertEqual(cmd[idx_out + 1], "vaapi")
-        # Direct vaapi encode; no hwupload filter needed
-        self.assertNotIn("-vf", cmd)
+        self.assertIn("-vaapi_device", cmd)
+        idx_vaapi = cmd.index("-vaapi_device")
+        self.assertEqual(cmd[idx_vaapi + 1], "/dev/dri/renderD128")
+        # Direct vaapi encode; scale_vaapi converts to nv12 without hwupload
+        self.assertIn("-vf", cmd)
+        idx_vf = cmd.index("-vf")
+        self.assertEqual(cmd[idx_vf + 1], "scale_vaapi=format=nv12")
         self.assertIn("-c:v", cmd)
         idx_c = cmd.index("-c:v")
         self.assertEqual(cmd[idx_c + 1], "h264_vaapi")
 
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")
-    def test_v4l2_h264_track_cmd_vaapi_hwaccel_decode_with_flip_falls_back_to_upload(self, mock_which):
-        # When orientation flip is requested, software filters are required so
-        # hwaccel_output_format=vaapi cannot be used; it must use format=nv12,hwupload
+    def test_v4l2_h264_track_cmd_vaapi_hwaccel_decode_with_flip(self, mock_which):
+        # When orientation flip is requested with hwaccel decode, hardware
+        # transpose_vaapi filters are chained onto the VAAPI filter graph.
         track = V4l2H264Track(
             device="/dev/video0",
             source_is_h264=False,
@@ -211,13 +216,46 @@ class TestVaapiEncoder(unittest.TestCase):
             video_size="1280x720",
             framerate=30,
             flip_horizontal=True,
+            flip_vertical=False,
         )
         cmd = track._ffmpeg_cmd()
-        self.assertNotIn("-hwaccel", cmd)
+        self.assertIn("-hwaccel", cmd)
+        self.assertEqual(cmd[cmd.index("-hwaccel") + 1], "vaapi")
+        self.assertIn("-hwaccel_device", cmd)
+        self.assertEqual(cmd[cmd.index("-hwaccel_device") + 1], "/dev/dri/renderD128")
+        self.assertIn("-hwaccel_output_format", cmd)
+        self.assertEqual(cmd[cmd.index("-hwaccel_output_format") + 1], "vaapi")
         self.assertIn("-vaapi_device", cmd)
+        self.assertEqual(cmd[cmd.index("-vaapi_device") + 1], "/dev/dri/renderD128")
         self.assertIn("-vf", cmd)
         idx_vf = cmd.index("-vf")
-        self.assertEqual(cmd[idx_vf + 1], "hflip,format=nv12,hwupload")
+        self.assertEqual(
+            cmd[idx_vf + 1],
+            "scale_vaapi=format=nv12,transpose_vaapi=dir=hflip",
+        )
+
+    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
+    def test_v4l2_h264_track_cmd_vaapi_hwaccel_decode_with_both_flips(self, mock_which):
+        track = V4l2H264Track(
+            device="/dev/video0",
+            source_is_h264=False,
+            encoder="vaapi",
+            vaapi_device="/dev/dri/renderD128",
+            hwaccel_decode=True,
+            input_format="mjpeg",
+            video_size="1280x720",
+            framerate=30,
+            flip_horizontal=True,
+            flip_vertical=True,
+        )
+        cmd = track._ffmpeg_cmd()
+        self.assertIn("-hwaccel", cmd)
+        self.assertIn("-vf", cmd)
+        idx_vf = cmd.index("-vf")
+        self.assertEqual(
+            cmd[idx_vf + 1],
+            "scale_vaapi=format=nv12,transpose_vaapi=dir=hflip,transpose_vaapi=dir=vflip",
+        )
 
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")
     def test_v4l2_h264_track_cmd_libx264(self, mock_which):

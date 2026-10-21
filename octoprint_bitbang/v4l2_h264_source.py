@@ -436,8 +436,9 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
                     "-hwaccel_device", self._vaapi_device,
                     "-hwaccel_output_format", "vaapi",
                 ]
-            else:
-                cmd += ["-vaapi_device", self._vaapi_device]
+                
+            cmd += ["-vaapi_device", self._vaapi_device]
+            
         cmd += ["-f", "v4l2"]
         # A device that advertises neither MJPEG nor YUYV has no format we can
         # name, which is the software rung's business: let ffmpeg pick.
@@ -454,7 +455,7 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
                 # Frames decoded directly into VAAPI surfaces; encode directly.
                 cmd += ["-c:v", "h264_vaapi",
                         "-b:v", str(self._bitrate), "-g", str(self._gop),
-                        "-bf", "0"]
+                        "-bf", "0", "-vf", "scale_vaapi=format=nv12"]
             else:
                 # Hardware VAAPI re-encode: upload nv12 frames to the VAAPI surface.
                 vf = [f for f, on in (("hflip", self._flip_h),

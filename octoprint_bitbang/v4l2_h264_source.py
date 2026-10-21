@@ -426,8 +426,7 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
         use_hwaccel_decode = (
             self._encoder == "vaapi" and
             self._hwaccel_decode and
-            self._input_format == "mjpeg" and
-            not (self._flip_h or self._flip_v)
+            self._input_format == "mjpeg"
         )
         if self._encoder == "vaapi":
             if use_hwaccel_decode:
@@ -452,10 +451,16 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
             cmd += ["-c", "copy"]                      # passthrough, no re-encode
         elif self._encoder == "vaapi":
             if use_hwaccel_decode:
+                vf = ["scale_vaapi=format=nv12"]
+                
+                vf.extend([f for f, on in (("transpose_vaapi=dir=hflip", self._flip_h),
+                                      ("transpose_vaapi=dir=vflip", self._flip_v)) if on])
+                                      
                 # Frames decoded directly into VAAPI surfaces; encode directly.
-                cmd += ["-c:v", "h264_vaapi",
+                cmd += ["-vf", ",".join(vf),
+                        "-c:v", "h264_vaapi",
                         "-b:v", str(self._bitrate), "-g", str(self._gop),
-                        "-bf", "0", "-vf", "scale_vaapi=format=nv12"]
+                        "-bf", "0"]
             else:
                 # Hardware VAAPI re-encode: upload nv12 frames to the VAAPI surface.
                 vf = [f for f, on in (("hflip", self._flip_h),

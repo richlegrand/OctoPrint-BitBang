@@ -438,7 +438,7 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
     @patch("octoprint_bitbang.v4l2_h264_source.has_v4l2m2m_h264_encoder", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.device_supports_h264", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.find_vaapi_device", return_value="/dev/dri/renderD128")
-    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_hwaccel_decode", return_value=True)
+    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_hwdecode_vpp_filters", return_value=True)
     def test_adapter_picks_vaapi_hwaccel_decode(self, mock_probe, mock_vaapi_dev, mock_h264, mock_m2m, mock_fmt, mock_which):
         from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
 
@@ -463,7 +463,7 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
     @patch("octoprint_bitbang.v4l2_h264_source.has_v4l2m2m_h264_encoder", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.device_supports_h264", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.find_vaapi_device", return_value="/dev/dri/renderD128")
-    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_hwaccel_decode", return_value=False)
+    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_hwdecode_vpp_filters", return_value=False)
     def test_adapter_hwaccel_decode_disabled_when_vpp_unsupported(self, mock_probe, mock_vaapi_dev, mock_h264, mock_m2m, mock_fmt, mock_which):
         from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
 

@@ -152,11 +152,17 @@ class OctoPrintBitBang(BitBangASGI):
                     vaapi_dev = find_vaapi_device(vaapi_dev_pref, settings=settings)
                     if vaapi_dev:
                         hwaccel_dec = bool(source.get("vaapi_hwaccel_decode", False))
-                        if hwaccel_dec and not probe_vaapi_hwdecode_vpp_filters(vaapi_dev, settings=settings):
-                            self._logger.warning(
-                                f"VAAPI VPP filters unsupported on {vaapi_dev}; "
-                                f"disabling hardware decode")
-                            hwaccel_dec = False
+                        if hwaccel_dec:
+                            if in_fmt != "mjpeg":
+                                self._logger.warning(
+                                    f"Only MJPEG input is supported for hardware decode; "
+                                    f"disabling hardware decode")
+                                hwaccel_dec = False
+                            elif not probe_vaapi_hwdecode_vpp_filters(vaapi_dev, settings=settings):
+                                self._logger.warning(
+                                    f"VAAPI VPP filters unsupported on {vaapi_dev}; "
+                                    f"disabling hardware decode")
+                                hwaccel_dec = False
                         player = V4l2H264Track(device, source_is_h264=source_is_h264,
                                                encoder="vaapi",
                                                vaapi_device=vaapi_dev,

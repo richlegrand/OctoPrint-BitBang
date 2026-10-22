@@ -486,6 +486,32 @@ class TestOctoPrintAdapterVaapiLadder(unittest.TestCase):
         mock_probe.assert_called_once_with("/dev/dri/renderD128", settings=VaapiProbeSettings())
 
     @patch("shutil.which", return_value="/usr/bin/ffmpeg")
+    @patch("octoprint_bitbang.v4l2_h264_source.reencode_input_format", return_value="yuyv422")
+    @patch("octoprint_bitbang.v4l2_h264_source.has_v4l2m2m_h264_encoder", return_value=False)
+    @patch("octoprint_bitbang.v4l2_h264_source.device_supports_h264", return_value=False)
+    @patch("octoprint_bitbang.v4l2_h264_source.find_vaapi_device", return_value="/dev/dri/renderD128")
+    @patch("octoprint_bitbang.v4l2_h264_source.probe_vaapi_hwdecode_vpp_filters", return_value=True)
+    def test_adapter_hwaccel_decode_disabled_when_not_mjpeg(self, mock_probe, mock_vaapi_dev, mock_h264, mock_m2m, mock_fmt, mock_which):
+        from octoprint_bitbang.octoprint_adapter import OctoPrintBitBang
+
+        async def _app(scope, receive, send):
+            pass
+
+        source = {
+            "type": "usb",
+            "device": "/dev/video0",
+            "format": "v4l2",
+            "encoder": "vaapi",
+            "vaapi_hwaccel_decode": True,
+        }
+        adapter = OctoPrintBitBang(_app, camera_source=source, ephemeral=True)
+        self.assertIsNotNone(adapter.player)
+        self.assertIsInstance(adapter.player, V4l2H264Track)
+        self.assertEqual(adapter.player._encoder, "vaapi")
+        self.assertFalse(adapter.player._hwaccel_decode)
+        mock_probe.assert_not_called()
+
+    @patch("shutil.which", return_value="/usr/bin/ffmpeg")
     @patch("octoprint_bitbang.v4l2_h264_source.reencode_input_format", return_value="mjpeg")
     @patch("octoprint_bitbang.v4l2_h264_source.has_v4l2m2m_h264_encoder", return_value=False)
     @patch("octoprint_bitbang.v4l2_h264_source.device_supports_h264", return_value=False)

@@ -22,6 +22,7 @@ output. If a future PyAV gains BSF support this can move in-process.
 """
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import os
 import shutil
@@ -254,15 +255,22 @@ def has_vaapi_h264_encoder(device=None):
         return False
 
 
-def probe_vaapi_h264(device_path, video_size="1280x720"):
-    """Test whether ffmpeg can actually encode a test frame with h264_vaapi
-    using the specified VAAPI device."""
+@dataclass
+class VaapiProbeSettings:
+    video_size: str = "1280x720"
+    flip_horizontal: bool = False
+    flip_vertical: bool = False
+
+
+def probe_vaapi_h264_encode(device_path, settings: VaapiProbeSettings):
+    """Test whether ffmpeg can encode with h264_vaapi using the specified VAAPI device."""
     if not shutil.which("ffmpeg"):
         return False
+
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-vaapi_device", device_path,
-        "-f", "lavfi", "-i", f"testsrc=s={video_size}:r=1",
+        "-f", "lavfi", "-i", f"testsrc=s={settings.video_size}:r=1",
         "-frames:v", "1",
         "-vf", "format=nv12,hwupload",
         "-c:v", "h264_vaapi",
@@ -275,16 +283,44 @@ def probe_vaapi_h264(device_path, video_size="1280x720"):
         return False
 
 
-def find_vaapi_device(explicit_device=None, video_size="1280x720"):
+def probe_vaapi_hwdecode_vpp_filters(device_path, settings: VaapiProbeSettings):
+    """Test whether the VAAPI device supports the VPP filters required for hardware decode
+    (scale_vaapi, and transpose_vaapi for any configured flips)."""
+    if not shutil.which("ffmpeg"):
+        return False
+
+    vf = ["format=nv12,hwupload", "scale_vaapi=format=nv12"]
+    if settings.flip_horizontal:
+        vf.append("transpose_vaapi=dir=hflip")
+    if settings.flip_vertical:
+        vf.append("transpose_vaapi=dir=vflip")
+
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-vaapi_device", device_path,
+        "-f", "lavfi", "-i", f"testsrc=s={settings.video_size}:r=1",
+        "-frames:v", "1",
+        "-vf", ",".join(vf),
+        "-c:v", "h264_vaapi",
+        "-f", "null", "-",
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=3)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def find_vaapi_device(explicit_device, settings: VaapiProbeSettings):
     """Find a render node whose driver can actually encode H.264."""
     import glob
     if not has_vaapi_h264_encoder():
         return None
     if explicit_device:
-        return explicit_device if probe_vaapi_h264(explicit_device, video_size=video_size) else None
+        return explicit_device if probe_vaapi_h264_encode(explicit_device, settings=settings) else None
     nodes = ["/dev/dri/renderD128"] + sorted(glob.glob("/dev/dri/renderD*"))
     for node in dict.fromkeys(nodes):
-        if os.path.exists(node) and probe_vaapi_h264(node, video_size=video_size):
+        if os.path.exists(node) and probe_vaapi_h264_encode(node, settings=settings):
             return node
     return None
 

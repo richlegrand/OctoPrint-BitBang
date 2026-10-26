@@ -419,7 +419,7 @@ class V4l2H264Track(CaptureSupervisor, MediaStreamTrack):
     def _ffmpeg_cmd(self):
         # Shared capture front-end; only the encode stage differs.
         cmd = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer",
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer",
         ]
         # Hardware decode is applicable for VAAPI when the input is MJPEG.
         # A flip no longer rules it out: transpose_vaapi does the flip on the

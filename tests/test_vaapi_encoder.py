@@ -147,6 +147,7 @@ class TestVaapiEncoder(unittest.TestCase):
             flip_vertical=False,
         )
         cmd = track._ffmpeg_cmd()
+        self.assertIn("-nostdin", cmd)
         self.assertIn("-vaapi_device", cmd)
         idx = cmd.index("-vaapi_device")
         self.assertEqual(cmd[idx + 1], "/dev/dri/renderD128")
@@ -182,6 +183,7 @@ class TestVaapiEncoder(unittest.TestCase):
             flip_vertical=False,
         )
         cmd = track._ffmpeg_cmd()
+        self.assertIn("-nostdin", cmd)
         self.assertIn("-hwaccel", cmd)
         idx_hw = cmd.index("-hwaccel")
         self.assertEqual(cmd[idx_hw + 1], "vaapi")
@@ -219,6 +221,7 @@ class TestVaapiEncoder(unittest.TestCase):
             flip_vertical=False,
         )
         cmd = track._ffmpeg_cmd()
+        self.assertIn("-nostdin", cmd)
         self.assertIn("-hwaccel", cmd)
         self.assertEqual(cmd[cmd.index("-hwaccel") + 1], "vaapi")
         self.assertIn("-hwaccel_device", cmd)
@@ -249,6 +252,7 @@ class TestVaapiEncoder(unittest.TestCase):
             flip_vertical=True,
         )
         cmd = track._ffmpeg_cmd()
+        self.assertIn("-nostdin", cmd)
         self.assertIn("-hwaccel", cmd)
         self.assertIn("-vf", cmd)
         idx_vf = cmd.index("-vf")
@@ -271,6 +275,7 @@ class TestVaapiEncoder(unittest.TestCase):
             video_size="640x480",
         )
         cmd = track._ffmpeg_cmd()
+        self.assertIn("-nostdin", cmd)
         idx = cmd.index("-c:v")
         self.assertEqual(cmd[idx + 1], "libx264")
         self.assertEqual(cmd[cmd.index("-preset") + 1], "ultrafast")
@@ -292,6 +297,7 @@ class TestVaapiEncoder(unittest.TestCase):
             input_format=None,
         )
         cmd = track._ffmpeg_cmd()
+        self.assertIn("-nostdin", cmd)
         self.assertNotIn("-input_format", cmd)
         self.assertNotIn(None, cmd)
         self.assertEqual(cmd[cmd.index("-i") + 1], "/dev/video0")
@@ -306,6 +312,7 @@ class TestVaapiEncoder(unittest.TestCase):
             video_size="1280x720",
         )
         cmd = track._ffmpeg_cmd()
+        self.assertIn("-nostdin", cmd)
         self.assertNotIn("-vaapi_device", cmd)
         self.assertIn("-c:v", cmd)
         idx = cmd.index("-c:v")
@@ -323,6 +330,7 @@ class TestVaapiEncoder(unittest.TestCase):
             input_format="h264",
         )
         cmd = track._ffmpeg_cmd()
+        self.assertIn("-nostdin", cmd)
         self.assertNotIn("-vaapi_device", cmd)
         self.assertIn("-c", cmd)
         idx = cmd.index("-c")

@@ -153,7 +153,8 @@ def device_supports_h264(device):
     if shutil.which("ffmpeg"):
         try:
             r = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-f", "v4l2", "-list_formats", "all", "-i", device],
+                ["ffmpeg", "-nostdin", "-hide_banner",
+                 "-f", "v4l2", "-list_formats", "all", "-i", device],
                 capture_output=True, text=True, timeout=5,
             )
             out = r.stdout + r.stderr
@@ -198,7 +199,8 @@ def reencode_input_format(device):
     if shutil.which("ffmpeg"):
         try:
             r = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-f", "v4l2", "-list_formats", "all", "-i", device],
+                ["ffmpeg", "-nostdin", "-hide_banner",
+                 "-f", "v4l2", "-list_formats", "all", "-i", device],
                 capture_output=True, text=True, timeout=5,
             )
             out = (r.stdout + r.stderr).lower()
@@ -219,7 +221,7 @@ def has_v4l2m2m_h264_encoder():
         return False
     try:
         encs = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
+            ["ffmpeg", "-nostdin", "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=8,
         ).stdout
         if "h264_v4l2m2m" not in encs:
@@ -240,7 +242,7 @@ def has_vaapi_h264_encoder(device=None):
         return False
     try:
         encs = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-encoders"],
+            ["ffmpeg", "-nostdin", "-hide_banner", "-encoders"],
             capture_output=True, text=True, timeout=8,
         ).stdout
         if "h264_vaapi" not in encs:
@@ -268,7 +270,7 @@ def probe_vaapi_h264_encode(device_path, settings: VaapiProbeSettings):
         return False
 
     cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-vaapi_device", device_path,
         "-f", "lavfi", "-i", f"testsrc=s={settings.video_size}:r=1",
         "-frames:v", "1",
@@ -296,7 +298,7 @@ def probe_vaapi_hwdecode_vpp_filters(device_path, settings: VaapiProbeSettings):
         vf.append("transpose_vaapi=dir=vflip")
 
     cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-vaapi_device", device_path,
         "-f", "lavfi", "-i", f"testsrc=s={settings.video_size}:r=1",
         "-frames:v", "1",

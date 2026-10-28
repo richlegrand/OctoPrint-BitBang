@@ -94,6 +94,7 @@ class TestVaapiEncoder(unittest.TestCase):
         self.assertTrue(probe_vaapi_h264_encode("/dev/dri/renderD128", settings=VaapiProbeSettings()))
         args, kwargs = mock_run.call_args
         cmd = args[0]
+        self.assertIn("-nostdin", cmd)
         self.assertIn("-vaapi_device", cmd)
         self.assertIn("/dev/dri/renderD128", cmd)
         self.assertIn("h264_vaapi", cmd)
@@ -132,6 +133,7 @@ class TestVaapiEncoder(unittest.TestCase):
         self.assertTrue(probe_vaapi_hwdecode_vpp_filters("/dev/dri/renderD128", settings=VaapiProbeSettings()))
         args, _ = mock_run.call_args
         cmd = args[0]
+        self.assertIn("-nostdin", cmd)
         self.assertIn("-vaapi_device", cmd)
         self.assertIn("/dev/dri/renderD128", cmd)
         self.assertIn("-vf", cmd)
